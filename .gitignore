@@ -2,4 +2,5 @@ node_modules/
 memory/memory.jsonl
 .sisyphus/
 .spec-workflow/
+private_test_usages/
 nul
