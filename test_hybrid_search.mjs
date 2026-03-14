@@ -155,11 +155,11 @@ async function test() {
     const hybrid1 =     await searchIntegrator.searchNode("JavaScript");
     assert(hybrid1.searchMode === 'hybrid', '默认使用混合搜索模式');
     assert(hybrid1._meta.returnedCount <= 15, '混合搜索返回数量受limit限制');
-    assert(hybrid1._meta.tfidfWeight === 0.7, 'TF-IDF权重为0.7');
+    assert(hybrid1._meta.bm25Weight === 0.7, 'TF-IDF权重为0.7');
     assert(hybrid1._meta.fuzzyWeight === 0.3, 'Fuse.js权重为0.3');
     console.log('   返回: ' + hybrid1._meta.returnedCount + ' 个实体 (限制: 15)');
     console.log('   候选总数: ' + hybrid1._meta.totalCandidates);
-    console.log('   TF-IDF权重: ' + hybrid1._meta.tfidfWeight);
+    console.log('   TF-IDF权重: ' + hybrid1._meta.bm25Weight);
     console.log('   Fuse.js权重: ' + hybrid1._meta.fuzzyWeight);
 
     const hybrid2 =     await searchIntegrator.searchNode("微软");
@@ -226,8 +226,8 @@ async function test() {
     console.log('   limit=3 返回: ' + customLimit._meta.returnedCount + ' 个实体');
 
     // 测试自定义权重
-    const customWeight =     await searchIntegrator.searchNode("JavaScript", { tfidfWeight: 0.9, fuzzyWeight: 0.1 });
-    assert(customWeight._meta.tfidfWeight === 0.9, '自定义TF-IDF权重生效');
+    const customWeight =     await searchIntegrator.searchNode("JavaScript", { bm25Weight: 0.9, fuzzyWeight: 0.1 });
+    assert(customWeight._meta.bm25Weight === 0.9, '自定义TF-IDF权重生效');
     assert(customWeight._meta.fuzzyWeight === 0.1, '自定义Fuse.js权重生效');
     console.log('   自定义权重: TF-IDF=0.9, Fuzzy=0.1');
 

@@ -4,7 +4,7 @@
  */
 
 import { KnowledgeGraphManager } from './index.js';
-import { NaturalTfIdfSearcher } from './src/tfidf/naturalSearch.js';
+import { NaturalTfIdfSearcher } from './src/tfidf/bm25Search.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { promises as fs } from 'fs';

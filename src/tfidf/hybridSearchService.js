@@ -4,7 +4,7 @@
  * Supports: query tokenization → individual search → aggregation → deduplication
  */
 
-import { NaturalTfIdfSearcher } from './naturalSearch.js';
+import { NaturalTfIdfSearcher } from './bm25Search.js';
 import { FuseSearcher } from './fuseSearch.js';
 
 /**

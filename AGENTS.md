@@ -10,7 +10,7 @@ This document provides guidelines for agentic coding agents operating in this re
 - Node.js 22+ with ES Modules
 - MCP (Model Context Protocol) SDK
 - Zod for runtime validation
-- natural 8.1.0 for BM25 (replaced TF-IDF)
+- 纯 JavaScript 实现 BM25（无外部依赖）
 - Fuse.js 7.1.0 for fuzzy search
 
 ## Build, Lint, and Test Commands
@@ -206,7 +206,7 @@ server.registerTool("tool_name", {
 src/tfidf/
 ├── searchIntegrator.js       # Integration layer, routes to appropriate search
 ├── hybridSearchService.js    # Core: tokenization → BM25 → Fuse.js → aggregate → fuse
-├── bm25Search.js           # BM25 using wink-bm25-text-search
+├── bm25Search.js           # BM25 搜索（纯 JavaScript 实现）
 ├── fuseSearch.js             # Fuzzy search using Fuse.js
 └── traditionalSearch.js      # Legacy keyword matching (backward compat)
 ```
