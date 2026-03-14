@@ -51,6 +51,20 @@ MEMORY_FILE_PATH=./custom/memory.jsonl
 
 ### Configure as MCP Server
 
+**Quickest (npx):**
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": ["npx", "-y", "@qty/memfs"],
+      "enabled": true
+    }
+  }
+}
+```
+
+**Or local (clone):**
+
 **VS Code / Claude Code format:**
 
 ```json
