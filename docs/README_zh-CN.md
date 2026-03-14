@@ -49,11 +49,12 @@ MEMORY_FILE_PATH=./custom/memory.jsonl
 
 ### 配置为 MCP 服务器
 
-**最快方式 (npx)：**
+**OpenCode 格式：**
 ```json
 {
   "mcpServers": {
     "memory": {
+      "type": "local",
       "command": ["npx", "-y", "@qty/memfs"],
       "enabled": true
     }
@@ -61,30 +62,12 @@ MEMORY_FILE_PATH=./custom/memory.jsonl
 }
 ```
 
-**或本地运行（克隆）：**
-
 **VS Code / Claude Code 格式：**
-
 ```json
 {
   "mcpServers": {
     "memory": {
-      "command": "node",
-      "args": ["/path/to/MemFS"],
-      "enabled": true
-    }
-  }
-}
-```
-
-**OpenCode 格式：**
-
-```json
-{
-  "mcpServers": {
-    "memory": {
-      "type": "local",
-      "command": ["node", "/path/to/MemFS"],
+      "command": ["npx", "-y", "@qty/memfs"],
       "enabled": true
     }
   }

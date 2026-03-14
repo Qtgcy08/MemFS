@@ -51,11 +51,12 @@ MEMORY_FILE_PATH=./custom/memory.jsonl
 
 ### Configure as MCP Server
 
-**Quickest (npx):**
+**OpenCode format:**
 ```json
 {
   "mcpServers": {
     "memory": {
+      "type": "local",
       "command": ["npx", "-y", "@qty/memfs"],
       "enabled": true
     }
@@ -63,30 +64,12 @@ MEMORY_FILE_PATH=./custom/memory.jsonl
 }
 ```
 
-**Or local (clone):**
-
 **VS Code / Claude Code format:**
-
 ```json
 {
   "mcpServers": {
     "memory": {
-      "command": "node",
-      "args": ["/path/to/MemFS"],
-      "enabled": true
-    }
-  }
-}
-```
-
-**OpenCode format:**
-
-```json
-{
-  "mcpServers": {
-    "memory": {
-      "type": "local",
-      "command": ["node", "/path/to/MemFS"],
+      "command": ["npx", "-y", "@qty/memfs"],
       "enabled": true
     }
   }
