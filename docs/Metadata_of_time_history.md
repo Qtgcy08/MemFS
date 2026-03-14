@@ -290,5 +290,5 @@ function formatTimestamp(data) {
 > **参考文档**：
 > 
 > - [AGENTS.md - 时间戳处理规范](../../AGENTS.md)
-> - [searchNode 技术报告](./searchNode技术报告.md)
-> - [MemFS 整体技术报告](./MemFS整体技术报告.md)
+> - [searchNode 技术报告](./searchNode_TechnicalReport.md)
+> - [MemFS 整体技术报告](./MemFS_TechnicalReport.md)
