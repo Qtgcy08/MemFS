@@ -49,6 +49,20 @@ MEMORY_FILE_PATH=./custom/memory.jsonl
 
 ### 配置为 MCP 服务器
 
+**最快方式 (npx)：**
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": ["npx", "-y", "@qty/memfs"],
+      "enabled": true
+    }
+  }
+}
+```
+
+**或本地运行（克隆）：**
+
 **VS Code / Claude Code 格式：**
 
 ```json
