@@ -62,12 +62,13 @@ MEMORY_FILE_PATH=./custom/memory.jsonl
 }
 ```
 
-**VS Code / Claude Code 格式：**
+**VSCode / ClaudeCode / Cherry Studio / AstrBot 格式：**
 ```json
 {
   "mcpServers": {
     "memory": {
-      "command": ["npx", "-y", "@qty/memfs"],
+      "command": "npx",
+      "args": ["-y", "@qty/memfs"],
       "enabled": true
     }
   }
