@@ -1,49 +1,51 @@
 # 🧠 MemFS
 
-**基于 MCP server-memory 深度重构的知识图谱管理系统**
+**A knowledge graph management system based on MCP server-memory, deeply refactored with filesystem-inspired design**
 
-> 💡 致谢：[原版 @modelcontextprotocol/server-memory](https://www.npmjs.com/package/@modelcontextprotocol/server-memory)  
-> 虽然已经"大开刀"，但灵感源自于此。
+> 💡 Acknowledgments: [Original @modelcontextprotocol/server-memory](https://www.npmjs.com/package/@modelcontextprotocol/server-memory)  
+> Inspired by it, though heavily reimagined.
 
 [![Node.js 22+](https://img.shields.io/badge/node-22+-green?style=for-the-badge&logo=node.js)](https://nodejs.org)
 
 ---
 
-## 🎯 一句话概括
+## 🎯 One-Line Description
 
-**将现代文件系统的核心概念迁移到知识图谱管理，结合 BM25 + 模糊搜索实现智能检索，专为 LLM 辅助人文社科研究设计。**
+**Bringing modern filesystem concepts to knowledge graph management, combined with BM25 + fuzzy search for intelligent retrieval, designed for LLM-assisted humanities and social sciences research.**
+
+> 📖 **中文版文档**: [docs/README_zh-CN.md](./docs/README_zh-CN.md)
 
 ---
 
-## 🚀 快速开始
+## 🚀 Quick Start
 
-### 前置条件
+### Prerequisites
 
 ```bash
-# 确认 Node.js 版本
-node --version  # 必须是 v22.0.0 或更高版本
+# Check Node.js version
+node --version  # Must be v22.0.0 or higher
 ```
 
-### 安装与运行
+### Installation & Run
 
 ```bash
-# 1. 克隆或下载项目
+# 1. Clone or download the project
 cd MemFS
 
-# 2. 安装依赖
+# 2. Install dependencies
 npm install
 
-# 3. 运行服务器
+# 3. Run server
 node index.js
 
-# 或者指定自定义存储路径
+# Or specify custom storage path
 MEMORY_DIR=~/my-knowledge
 MEMORY_FILE_PATH=./custom/memory.jsonl
 ```
 
-### 配置为 MCP 服务器
+### Configure as MCP Server
 
-**VS Code / Claude Code 格式：**
+**VS Code / Claude Code format:**
 
 ```json
 {
@@ -57,7 +59,7 @@ MEMORY_FILE_PATH=./custom/memory.jsonl
 }
 ```
 
-**OpenCode 格式：**
+**OpenCode format:**
 
 ```json
 {
@@ -73,171 +75,171 @@ MEMORY_FILE_PATH=./custom/memory.jsonl
 
 ---
 
-## 📖 核心概念
+## 📖 Core Concepts
 
-| 概念                   | 说明        | 类比    |
-| -------------------- | --------- | ----- |
-| **实体 (Entity)**      | 知识图谱中的节点  | 文件    |
-| **观察 (Observation)** | 实体的属性/描述  | inode |
-| **关系 (Relation)**    | 实体间的连接    | 软链接   |
-| **引用 (Reference)**   | 实体指向观察的指针 | 硬链接   |
+| Concept | Description | Analogy |
+|---------|-------------|---------|
+| **Entity** | Nodes in the knowledge graph | File |
+| **Observation** | Properties/descriptions of entities | inode |
+| **Relation** | Connections between entities | Soft link |
+| **Reference** | Pointers from entities to observations | Hard link |
 
 ---
 
-## 💡 核心设计思想
+## 💡 Core Design Philosophy
 
-### 1. 适配 Transformer：按需获取
+### 1. Transformer-Ready: On-Demand Retrieval
 
 ```mermaid
 flowchart TD
     LLM["LLM"]
-    ATT["注意力机制"]
+    ATT["Attention Mechanism"]
     MCP["MCP Protocol"]
-    MEM["MemFS\n按需获取结构化数据"]
+    MEM["MemFS\nOn-demand structured data"]
 
     LLM --> ATT --> MCP --> MEM
-    MEM -.-> |返回结果| LLM
+    MEM -.-> |Returns results| LLM
 ```
 
-**核心理念**：不把所有知识塞进上下文，而是按需获取。
+**Core principle**: Don't stuff all knowledge into context—retrieve on demand.
 
-### 2. 轻量化设计
+### 2. Lightweight Design
 
-| 维度   | 传统方案         | MemFS       |
-| ---- | ------------ | ----------- |
-| 部署   | 数据库 + 向量引擎   | 纯 Node.js   |
-| 资源   | GPU 推荐，内存占用大 | CPU 即可      |
-| 可解释性 | 黑盒模型         | BM25 透明可控 |
+| Dimension | Traditional Solution | MemFS |
+|-----------|---------------------|-------|
+| Deployment | Database + Vector Engine | Pure Node.js |
+| Resources | GPU recommended, high memory | CPU only |
+| Explainability | Black-box models | BM25 transparent & controllable |
 
-### 3. 本地化 JSONL 存储
+### 3. Local JSONL Storage
 
 ```jsonl
-{"type":"entity","name":"韦伯","entityType":"人物","definition":"德国社会学家","observationIds":[1,2]}
-{"type":"observation","id":1,"content":"《新教伦理与资本主义精神》作者","createdAt":"2024-01-15"}
-{"type":"relation","from":"韦伯","to":"涂尔干","relationType":"并称"}
+{"type":"entity","name":"Weber","entityType":"person","definition":"German sociologist","observationIds":[1,2]}
+{"type":"observation","id":1,"content":"Author of 'The Protestant Ethic'","createdAt":{"utc":"2026-02-08T13:53:07Z","timezone":"Asia/Shanghai"}}
+{"type":"relation","from":"Weber","to":"Durkheim","relationType":"contemporary"}
 ```
 
-**优势**：可用任何文本编辑器打开、可放入 Git 版本控制、可打印。
+**Advantages**: Editable with any text editor, Git-version-controllable, printable.
 
-### 4. 人文社科定制
+### 4. Humanities & Social Sciences Customization
 
-| 需求类型 | 传统方案 | MemFS      |
-| ---- | ---- | ---------- |
-| 知识单元 | 函数/类 | 概念/人物/文献   |
-| 关联模式 | 调用关系 | 影响/引用/对比关系 |
-| 更新频率 | 高频   | 低频增补、高频引用  |
-
----
-
-## 📦 完整 API 工具清单（16个）
-
-### 创建类
-
-| 工具               | 功能              | 示例         |
-| ---------------- | --------------- | ---------- |
-| `createEntity`   | 批量创建实体（可同步添加观察） | 添加概念、人物、文献 |
-| `createRelation` | 建立实体间的关联关系      | 标记引用、对比、影响 |
-| `addObservation` | 向已有实体添加观察内容     | 补充阅读笔记     |
-
-### 读取类
-
-| 工具                | 功能              | 示例        |
-| ----------------- | --------------- | --------- |
-| `searchNode`      | BM25 + 模糊混合检索 | 智能搜索相关知识  |
-| `readNode`        | 读取指定实体的完整信息     | 获取详细属性和关联 |
-| `readObservation` | 根据 ID 批量读取观察    | 核查具体观察内容  |
-| `listNode`        | 列出所有实体概览        | 浏览知识库结构   |
-| `listGraph`       | 读取整个知识图谱        | 批量导出、迁移   |
-| `howWork`         | 获取推荐工作流指导       | 了解系统使用方法  |
-
-### 更新类
-
-| 工具                  | 功能                      | 示例        |
-| ------------------- | ----------------------- | --------- |
-| `updateNode`        | 更新实体及其观察（Copy-on-Write） | 修改定义、更新笔记 |
-| `updateObservation` | 批量更新观察内容                | 批量修正信息    |
-
-### 删除类
-
-| 工具                     | 功能           | 示例     |
-| ---------------------- | ------------ | ------ |
-| `deleteEntity`         | 删除实体及关联关系    | 移除过时条目 |
-| `deleteRelation`       | 删除特定关系       | 解除关联   |
-| `deleteObservation`    | 解除观察链接（保留观察） | 移除引用   |
-| `getOrphanObservation` | 查找孤儿观察       | 发现无效数据 |
-| `recycleObservation`   | 回收并永久删除观察    | 清理无用数据 |
+| Requirement Type | Traditional | MemFS |
+|-----------------|-------------|-------|
+| Knowledge units | Functions/Classes | Concepts/People/Documents |
+| Relationship types | Function calls | Influence/Reference/Comparison |
+| Update frequency | High-frequency | Low-frequency add, high-frequency reference |
 
 ---
 
-## 🔍 混合搜索（searchNode）
+## 📦 Complete API Tools (16 total)
 
-### 核心特性
+### Create
 
-| 特性         | 说明                       |
-| ---------- | ------------------------ |
-| **BM25** | 考虑词频和文档频率，返回语义相关结果       |
-| **模糊搜索**   | 容忍拼写错误，支持近似匹配            |
-| **查询分词**   | 自动分词、独立检索、聚合去重           |
-| **加权融合**   | BM25 0.7 + 模糊 0.3，综合排序 |
+| Tool | Function | Example |
+|------|----------|---------|
+| `createEntity` | Batch create entities (with observations) | Add concepts, people, documents |
+| `createRelation` | Create relations between entities | Mark references, comparisons, influences |
+| `addObservation` | Add observations to existing entities | Supplement reading notes |
 
-### 参数配置
+### Read
+
+| Tool | Function | Example |
+|------|----------|---------|
+| `searchNode` | BM25 + Fuzzy hybrid search | Intelligent knowledge search |
+| `readNode` | Read complete entity information | Get detailed attributes and relations |
+| `readObservation` | Batch read observations by ID | Verify specific observations |
+| `listNode` | List all entity overviews | Browse knowledge structure |
+| `listGraph` | Read entire knowledge graph | Batch export, migration |
+| `howWork` | Get recommended workflow guidance | Learn how to use the system |
+
+### Update
+
+| Tool | Function | Example |
+|------|----------|---------|
+| `updateNode` | Update entities and observations (Copy-on-Write) | Modify definitions, update notes |
+| `updateObservation` | Batch update observation content | Batch correct information |
+
+### Delete
+
+| Tool | Function | Example |
+|------|----------|---------|
+| `deleteEntity` | Delete entities and relations | Remove outdated entries |
+| `deleteRelation` | Delete specific relations | Unlink entities |
+| `deleteObservation` | Unlink observations (preserve observation) | Remove references |
+| `getOrphanObservation` | Find orphan observations | Discover invalid data |
+| `recycleObservation` | Permanently delete observations | Clean up unused data |
+
+---
+
+## 🔍 Hybrid Search (searchNode)
+
+### Core Features
+
+| Feature | Description |
+|---------|-------------|
+| **BM25** | Considers term frequency and document frequency |
+| **Fuzzy Search** | Tolerates typos, supports approximate matching |
+| **Query Tokenization** | Tokenize → Search individually → Aggregate → Deduplicate |
+| **Weighted Fusion** | BM25 0.7 + Fuzzy 0.3, combined ranking |
+
+### Parameters
 
 ```javascript
-// 默认混合搜索
-await searchNode("功能主义");  // BM25 + 模糊
+// Default hybrid search
+await searchNode("functionalism");  // BM25 + Fuzzy
 
-// 传统关键词搜索
-await searchNode("功能主义", { basicFetch: true });
+// Traditional keyword search
+await searchNode("functionalism", { basicFetch: true });
 
-// 自定义参数
-await searchNode("社会学", {
-    limit: 15,          // 返回数量
-    bm25Weight: 0.7,  // BM25 权重
-    fuzzyWeight: 0.3,   // 模糊搜索权重
-    minScore: 0.01      // 最小相关性阈值
+// Custom parameters
+await searchNode("sociology", {
+    limit: 15,          // Return count
+    bm25Weight: 0.7,    // BM25 weight
+    fuzzyWeight: 0.3,   // Fuzzy search weight
+    minScore: 0.01      // Minimum relevance threshold
 });
 ```
 
-### 字段权重
+### Field Weights
 
-| 字段          | 权重  | 说明        |
-| ----------- | --- | --------- |
-| name        | 3.0 | 最高 - 实体名称 |
-| entityType  | 2.0 | 实体类型      |
-| definition  | 2.0 | 定义描述      |
-| observation | 2.0 | 观察内容      |
+| Field | Weight | Description |
+|-------|--------|-------------|
+| name | 5.0 | Highest - entity name |
+| entityType | 4.0 | Entity type |
+| definition | 4.0 | Definition description |
+| observation | 3.0 | Observation content |
 
 ---
 
-## 🔧 文件系统设计思想
+## 🔧 Filesystem-Inspired Design
 
-### 架构类比
+### Architecture Analogy
 
-| 文件系统概念      | MemFS 实现      | 解决的问题 |
-| ----------- | ------------- | ----- |
-| **Inode 表** | 观察集中存储        | 数据冗余  |
-| **硬链接**     | 多实体引用同一观察     | 共享复用  |
-| **软链接**     | 实体关系          | 灵活关联  |
-| **写时复制**    | Copy-on-Write | 并发安全  |
-| **孤儿检测**    | 孤立观察清理        | 资源回收  |
+| Filesystem Concept | MemFS Implementation | Solves |
+|-------------------|---------------------|--------|
+| **Inode Table** | Centralized observation storage | Data redundancy |
+| **Hard Links** | Multiple entities reference same observation | Shared reuse |
+| **Soft Links** | Entity relations | Flexible associations |
+| **Copy-on-Write** | Copy-on-Write updates | Concurrency safety |
+| **Orphan Detection** | Orphan observation cleanup | Resource recovery |
 
-### 观察共享机制
+### Observation Sharing
 
 ```javascript
-// 创建两个共享同一观察的实体
+// Create two entities sharing the same observation
 await createEntity([
-  { name: "张三", observations: ["程序员"] },
-  { name: "李四", observations: ["程序员"] }
+  { name: "Zhang San", observations: ["Programmer"] },
+  { name: "Li Si", observations: ["Programmer"] }
 ]);
 
-// 底层：复用同一个观察 ID
+// Under the hood: same observation ID is reused
 {
   entities: [
-    { name: "张三", observationIds: [1] },
-    { name: "李四", observationIds: [1] }
+    { name: "Zhang San", observationIds: [1] },
+    { name: "Li Si", observationIds: [1] }
   ],
   observations: [
-    { id: 1, content: "程序员" }
+    { id: 1, content: "Programmer" }
   ]
 }
 ```
@@ -245,100 +247,100 @@ await createEntity([
 ### Copy-on-Write
 
 ```javascript
-// 更新被共享的观察
+// Update a shared observation
 await updateNode({
-  entityName: "张三",
+  entityName: "Zhang San",
   observationUpdates: [
-    { oldContent: "程序员", newContent: "资深程序员" }
+    { oldContent: "Programmer", newContent: "Senior Programmer" }
   ]
 });
 
-// 结果：张三获得新观察，李四保持原观察
+// Result: Zhang San gets new observation, Li Si keeps original
 {
   observations: [
-    { id: 1, content: "程序员" },      // 李四使用
-    { id: 2, content: "资深程序员" }     // 张三新观察
+    { id: 1, content: "Programmer" },      // Li Si uses
+    { id: 2, content: "Senior Programmer" } // Zhang San's new observation
   ]
 }
 ```
 
 ---
 
-## 📁 数据格式
+## 📁 Data Format
 
-### JSONL 存储
+### JSONL Storage
 
 ```jsonl
-{"type":"entity","name":"韦伯","entityType":"人物","definition":"德国社会学家","definitionSource":"Wikipedia","observationIds":[1,2]}
-{"type":"observation","id":1,"content":"《新教伦理与资本主义精神》作者","createdAt":"2024-01-15 10:30:00+0800"}
-{"type":"observation","id":2,"content":"与涂尔干、马克思并称社会学三大奠基人","createdAt":"2024-01-15 10:30:00+0800"}
-{"type":"relation","from":"韦伯","to":"涂尔干","relationType":"并称"}
+{"type":"entity","name":"Weber","entityType":"person","definition":"German sociologist","definitionSource":"Wikipedia","observationIds":[1,2]}
+{"type":"observation","id":1,"content":"Author of 'The Protestant Ethic'","createdAt":{"utc":"2026-02-08T13:53:07Z","timezone":"Asia/Shanghai"}}
+{"type":"observation","id":2,"content":"Contemporary with Durkheim and Marx","createdAt":{"utc":"2026-02-08T14:00:00Z","timezone":"Asia/Shanghai"}}
+{"type":"relation","from":"Weber","to":"Durkheim","relationType":"contemporary"}
 ```
 
-### 存储位置
+### Storage Locations
 
-| 方式    | 路径                                     |
-| ----- | -------------------------------------- |
-| 默认    | `~/.memory/memory.jsonl`               |
-| 自定义目录 | `MEMORY_DIR=/path/to/data`             |
-| 自定义路径 | `MEMORY_FILE_PATH=/path/to/file.jsonl` |
+| Method | Path |
+|--------|------|
+| Default | `~/.memory/memory.jsonl` |
+| Custom directory | `MEMORY_DIR=/path/to/data` |
+| Custom path | `MEMORY_FILE_PATH=/path/to/file.jsonl` |
 
 ---
 
-## 🧪 测试
+## 🧪 Testing
 
 ```bash
-# 完整测试套件（45个测试）
+# Full test suite (45 tests)
 node test_full.mjs
 
-# 混合搜索测试（38个测试）
+# Hybrid search tests (38 tests)
 node test_hybrid_search.mjs
 
-# 观察搜索测试
+# Observation search tests
 node test_observation_search.mjs
 ```
 
 ---
 
-## ⚙️ 与原版 MCP Memory 对比
+## ⚙️ Comparison with Original MCP Memory
 
-| 维度            | 原版     | MemFS         |
-| ------------- | ------ | ------------- |
-| **观察存储**      | 嵌入实体内部 | 集中存储 + ID引用   |
-| **数据共享**      | 不支持    | 硬链接式共享        |
-| **更新机制**      | 直接覆盖   | Copy-on-Write |
-| **检索能力**      | 简单关键词  | BM25 + 模糊搜索 |
-| **孤立检测**      | 无      | 支持            |
-| **缓存机制**      | 无      | 30秒TTL        |
-| **Windows兼容** | 未知     | 优雅降级          |
-
----
-
-## 📚 设计理念
-
-**什么？你还在看？好吧，你赢了。**
-
-坦白说，这个项目的起源是这样的：
-
-1. **LLM 上下文有限** —— 不能把所有知识塞进 prompt
-2. **文件系统是个伟大的发明** —— 处理"多数据共享同一内容"已非常成熟
-3. **人文社科研究的特殊需求** —— 概念、文献、引用关系
-4. **可控性比 SOTA 重要** —— 不需要黑盒向量模型
-
-所以：
-
-- **文件系统智慧借鉴过来**：inode 表、硬链接、写时复制
-- **搜索用 BM25 + 模糊**：轻量、可解释、透明可控
-- **工具化暴露**：16 个 MCP 工具，LLM 按需调用
-
-**结果？** —— 一个安静、高效、不打扰的知识管理工具。
+| Dimension | Original | MemFS |
+|-----------|----------|-------|
+| **Observation Storage** | Embedded in entities | Centralized + ID reference |
+| **Data Sharing** | Not supported | Hard-link style sharing |
+| **Update Mechanism** | Direct overwrite | Copy-on-Write |
+| **Search Capability** | Simple keyword | BM25 + Fuzzy |
+| **Orphan Detection** |理论上不存在孤儿观察 | Supported |
+| **Cache Mechanism** | None | 30s TTL |
+| **Windows Compatibility** | Unknown | Graceful degradation |
 
 ---
 
-## 📄 许可证
+## 📚 Design Philosophy
+
+**What? You're still reading? Well, alright.**
+
+Honestly, this project started because:
+
+1. **LLM context is limited** — can't stuff all knowledge into prompts
+2. **Filesystem is a great invention** — handling "multiple data sharing same content" is mature
+3. **Humanities research has special needs** — concepts, literature, citation relationships
+4. **Controllability > SOTA** — no need for black-box vector models
+
+So:
+
+- **Borrow filesystem wisdom**: inode table, hard links, copy-on-write
+- **Search uses BM25 + Fuzzy**: lightweight, explainable, transparent, controllable
+- **Expose as tools**: 16 MCP tools, LLM calls on demand
+
+**Result?** — A quiet, efficient, unobtrusive knowledge management tool.
+
+---
+
+## 📄 License
 
 Apache License 2.0
 
 ---
 
-**用文件系统的方式管理知识，让混乱变得有序。**
+**Manage knowledge the filesystem way—bringing order to chaos.**
