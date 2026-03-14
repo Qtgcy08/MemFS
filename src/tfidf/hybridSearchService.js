@@ -184,7 +184,7 @@ export class HybridSearchService {
 
     /**
      * Aggregate results from multiple terms
-     * CRITICAL: Full query matches get higher weight in addEntityScore
+     * CRITICAL: Full query + name match gets 5x weight
      */
     aggregateResults(termResults, fullQuery) {
         // Collect all entity scores
@@ -194,18 +194,14 @@ export class HybridSearchService {
             // Process TF-IDF results
             tfidfResults.forEach(result => {
                 if (result.score > 0) {
-                    // Full query matches get 2x weight
-                    const weightMultiplier = isFullQuery ? 2.0 : 1.0;
-                    this.addEntityScore(entityScores, result, term, 'tfidf', weightMultiplier);
+                    this.addEntityScore(entityScores, result, term, 'tfidf', isFullQuery);
                 }
             });
 
             // Process Fuse results
             fuseResults.forEach(result => {
                 if (result.score > 0) {
-                    // Full query matches get 2x weight
-                    const weightMultiplier = isFullQuery ? 2.0 : 1.0;
-                    this.addEntityScore(entityScores, result, term, 'fuse', weightMultiplier);
+                    this.addEntityScore(entityScores, result, term, 'fuse', isFullQuery);
                 }
             });
         });
@@ -215,9 +211,9 @@ export class HybridSearchService {
 
     /**
      * Add entity score to aggregation
-     * CRITICAL: weightMultiplier allows full query to have higher weight
+     * CRITICAL: fullQuery + name match gets 5x weight boost
      */
-    addEntityScore(entityScores, result, term, source, weightMultiplier = 1.0) {
+    addEntityScore(entityScores, result, term, source, isFullQuery = false) {
         const { entityName, normalizedScore, matchedFields } = result;
 
         if (!entityScores.has(entityName)) {
@@ -228,11 +224,28 @@ export class HybridSearchService {
                 fuzzyScore: 0,
                 matchedTerms: new Set(),
                 matchedFields: new Map(),
-                fullQueryMatch: false  // Track if full query matched
+                fullQueryMatch: false,
+                fullQueryNameMatch: false  // Track if full query matched entity name
             });
         }
 
         const entry = entityScores.get(entityName);
+
+        // Calculate weight multiplier
+        // 5x boost if full query exactly matches entity name
+        // 2x boost if full query matches other fields
+        // 1x normal weight
+        let weightMultiplier = 1.0;
+        if (isFullQuery) {
+            const nameMatched = matchedFields.some(f => f.field === 'name');
+            if (nameMatched) {
+                weightMultiplier = 5.0;
+                entry.fullQueryNameMatch = true;
+            } else {
+                weightMultiplier = 2.0;
+            }
+            entry.fullQueryMatch = true;
+        }
 
         // Apply weight multiplier for full query matches
         const weightedScore = normalizedScore * weightMultiplier;
@@ -267,13 +280,14 @@ export class HybridSearchService {
 
     /**
      * Apply weighted fusion and sorting
-     * CRITICAL: Full query matches get additional boost
+     * CRITICAL: Full query + name match gets additional 2x boost (total 10x with previous 5x)
      */
     applyFusion(entityScores, bm25Weight, fuzzyWeight, fullQuery) {
         const results = [];
 
-        // Pre-calculate full query boost
-        const FULL_QUERY_BOOST = 1.5;  // Additional boost for full query matches
+        // Additional boost for full query name match
+        const FULL_QUERY_BOOST = 1.5;  // For full query non-name matches (total 3x with previous 2x)
+        const FULL_QUERY_NAME_BOOST = 2.0;  // Extra boost for full query + name (total 10x with previous 5x)
 
         entityScores.forEach(entry => {
             // Apply weighted fusion
@@ -285,7 +299,12 @@ export class HybridSearchService {
             const termBoost = Math.log2(1 + entry.matchedTerms.size);
 
             // Additional boost if full query matched
-            const fullQueryBoost = entry.fullQueryMatch ? FULL_QUERY_BOOST : 1.0;
+            let fullQueryBoost = 1.0;
+            if (entry.fullQueryNameMatch) {
+                fullQueryBoost = FULL_QUERY_NAME_BOOST;  // 2x extra = total 10x
+            } else if (entry.fullQueryMatch) {
+                fullQueryBoost = FULL_QUERY_BOOST;  // 1.5x extra = total 3x
+            }
 
             const finalBoostedScore = finalScore * termBoost * fullQueryBoost;
 
@@ -296,7 +315,8 @@ export class HybridSearchService {
                 fuzzyScore: entry.fuzzyScore,
                 matchedTerms: Array.from(entry.matchedTerms),
                 matchedFields: Array.from(entry.matchedFields.values()),
-                fullQueryMatch: entry.fullQueryMatch
+                fullQueryMatch: entry.fullQueryMatch,
+                fullQueryNameMatch: entry.fullQueryNameMatch
             });
         });
 
@@ -383,7 +403,12 @@ export class HybridSearchService {
                     isFullQuery: tr.isFullQuery || false,
                     tfidfCount: tr.tfidfCount,
                     fuseCount: tr.fuseCount
-                }))
+                })),
+                scoring: {
+                    fullQueryNameMatchBoost: '5x base + 2x fusion = 10x total',
+                    fullQueryMatchBoost: '2x base + 1.5x fusion = 3x total',
+                    normalBoost: '1x'
+                }
             }
         };
     }
