@@ -1,7 +1,35 @@
 {
+  "name": "@qty/memfs",
+  "version": "1.2.1",
+  "description": "Knowledge graph management system with BM25 + fuzzy search, inspired by filesystem concepts",
   "type": "module",
+  "main": "index.js",
+  "bin": {
+    "memfs": "index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "node test_full.mjs"
+  },
+  "keywords": [
+    "knowledge-graph",
+    "mcp",
+    "bm25",
+    "fuzzy-search",
+    "memory",
+    "notes"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Qtgcy08/MemFS.git"
+  },
+  "author": "Qtgcy",
+  "license": "Apache-2.0",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "fuse.js": "^7.1.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
   }
 }
