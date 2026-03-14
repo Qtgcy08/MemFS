@@ -145,9 +145,25 @@ catch (error) {
 |----------|---------|---------|
 | `getSystemTimezone()` | Get IANA timezone from system | `"Asia/Shanghai"`, `"UTC"`, etc. |
 | `getCurrentTimestamp()` | Create timestamp for storage | `{utc, timezone}` object |
+| `parseTimestampToStorage()` | Parse API format back to storage | `{utc, timezone}` object |
 | `formatWithTimezone()` | Convert UTC to local time | `"YYYY-MM-DD HH:mm:ss Timezone"` |
 | `formatTimestamp()` | Format timestamp for API response | `{value, type}` object |
 | `formatObservationTimestamp()` | Format observation timestamps | `{createdAt, updatedAt}` object |
+
+**parseTimestampToStorage - Auto-convert on load:**
+```javascript
+// "2026-02-09 22:02:06 Asia/Shanghai" -> {utc, timezone} (NEW format converted)
+parseTimestampToStorage("2026-02-09 22:02:06 Asia/Shanghai")
+// Returns: { utc: "2026-02-09T14:02:06Z", timezone: "Asia/Shanghai" }
+
+// "2026-02-08T08:18:30.317Z" -> stays as-is (legacy UTC)
+parseTimestampToStorage("2026-02-08T08:18:30.317Z")
+// Returns: "2026-02-08T08:18:30.317Z"
+
+// "2026-02-08 14:28:29+0800" -> stays as-is (legacy offset)
+parseTimestampToStorage("2026-02-08 14:28:29+0800")
+// Returns: "2026-02-08 14:28:29+0800"
+```
 
 **formatTimestamp Return Format:**
 ```javascript

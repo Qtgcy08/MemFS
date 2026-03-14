@@ -257,6 +257,13 @@ function formatTimestamp(data) {
 | API 响应（有更新）   | `{utc, timezone, updatedAt}` | `"2026-02-09 22:02:06 Asia/Shanghai"`（返回 updatedAt） |
 | API 响应（旧格式）   | `"2026-02-08T08:18:30.317Z"` | `"2026-02-08T08:18:30.317Z"`                        |
 
+> **持久化层面**：数据保存到 JSONL 文件时，`{utc, timezone}` 对象通过 `JSON.stringify()` 存储为：
+> ```json
+> {"createdAt":{"utc":"2026-03-14T10:31:28.821Z","timezone":"Asia/Shanghai"}}
+> ```
+>
+> **自动转换**：加载旧数据时，自动将 `"2026-02-09 22:02:06 Asia/Shanghai"` 格式转换回 `{utc, timezone}` 对象。更旧的格式（UTC ISO 或本地+偏移）保持不变。
+
 ---
 
 ## 五、未来展望
