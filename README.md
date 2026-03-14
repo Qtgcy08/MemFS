@@ -28,6 +28,12 @@ node --version  # Must be v22.0.0 or higher
 
 ### Installation & Run
 
+**Quickest way (npx):**
+```bash
+npx @qty/memfs
+```
+
+**Or clone and run:**
 ```bash
 # 1. Clone or download the project
 cd MemFS

@@ -26,6 +26,12 @@ node --version  # 必须是 v22.0.0 或更高版本
 
 ### 安装与运行
 
+**最快方式 (npx)：**
+```bash
+npx @qty/memfs
+```
+
+**或克隆运行：**
 ```bash
 # 1. 克隆或下载项目
 cd MemFS
