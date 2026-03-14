@@ -47,7 +47,7 @@ src/tfidf/
 ├── index.js                    # 模块入口，统一导出
 ├── searchIntegrator.js         # 集成层，路由分发
 ├── hybridSearchService.js      # 混合搜索核心服务
-├── naturalSearch.js            # BM25 搜索实现
+├── bm25Search.js               # BM25 搜索实现
 ├── fuseSearch.js               # 模糊搜索实现
 └── traditionalSearch.js        # 传统搜索实现（向后兼容）
 ```
@@ -58,7 +58,7 @@ src/tfidf/
 
 **hybridSearchService.js**：混合搜索服务，是整个方案的核心模块。它封装了 BM25 搜索器和模糊搜索器，协调两个搜索器的工作，实现查询分词、多路检索、结果聚合和加权融合等复杂逻辑。该服务是用户默认使用的搜索模式。
 
-**naturalSearch.js**：基于 natural 库的 BM25 搜索实现。由于 natural 8.x 版本的 API 变化，原有的搜索器类已不可用，因此本模块实现了自定义的 BM25 索引构建和搜索逻辑，包括文档建模、权重计算和相关性评分等功能。
+**bm25Search.js**：BM25 搜索实现。由于 natural 8.x 版本的 API 变化，原有的搜索器类已不可用，因此本模块实现了自定义的 BM25 索引构建和搜索逻辑，包括文档建模、权重计算和相关性评分等功能。
 
 **fuseSearch.js**：基于 Fuse.js 的模糊搜索实现，负责提供拼写容错和模糊匹配能力。它封装了 Fuse.js 的索引构建和搜索 API，输出与 BM25 搜索结果格式一致的响应，便于后续的结果融合处理。
 
