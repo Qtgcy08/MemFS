@@ -491,7 +491,7 @@ if (needsMigration) {
   | 方向     | 说明                              |
   | ------ | ------------------------------- |
   | Git 联动 | 版本控制、云同步、分布式协作                  |
-  | 可视化    | 生成知识图谱 DOT/Graphviz/Markmind 文件 |
+  | 可视化    | 生成知识图谱 DOT/Graphviz/Markmind  文件 |
   | 导入导出   | 支持常见格式（Markdown、CSV、BibTeX）     |
 
 ---

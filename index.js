@@ -144,6 +144,64 @@ function getCurrentTimestamp() {
     };
 }
 
+// Parse formatted timestamp back to storage format
+// "2026-02-09 22:02:06 Asia/Shanghai" -> {utc: "2026-02-09T14:02:06Z", timezone: "Asia/Shanghai"}
+function parseTimestampToStorage(formattedValue) {
+    if (!formattedValue) return null;
+    
+    // Already an object (new format)
+    if (typeof formattedValue === 'object' && formattedValue.utc) {
+        return formattedValue;
+    }
+    
+    // New format: "2026-02-09 22:02:06 Asia/Shanghai"
+    const newFormatMatch = formattedValue.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) ([A-Za-z_\/]+)$/);
+    if (newFormatMatch) {
+        const [, localDateTime, timezone] = newFormatMatch;
+        // Parse local time with timezone to UTC
+        // Create a Date that represents the local time in the given timezone
+        const [datePart, timePart] = localDateTime.split(' ');
+        const [year, month, day] = datePart.split('-').map(Number);
+        const [hour, minute, second] = timePart.split(':').map(Number);
+        
+        // Use Intl to get UTC from local time + timezone
+        const formatter = new Intl.DateTimeFormat('en-US', {
+            timeZone: timezone,
+            year: 'numeric', month: 'numeric', day: 'numeric',
+            hour: 'numeric', minute: 'numeric', second: 'numeric',
+            hour12: false
+        });
+        
+        // Create a date in UTC, then adjust
+        const utcDate = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+        
+        // Get the offset for this timezone at this time
+        const parts = formatter.formatToParts(utcDate);
+        const getPart = (type) => parts.find(p => p.type === type).value;
+        
+        // Calculate the offset by comparing
+        const localYear = Number(getPart('year'));
+        const localMonth = Number(getPart('month'));
+        const localDay = Number(getPart('day'));
+        const localHour = Number(getPart('hour'));
+        const localMinute = Number(getPart('minute'));
+        
+        // Simple approach: use the local time as if it's in the timezone
+        // and construct a date, then get its UTC equivalent
+        const testDate = new Date(year, month - 1, day, hour, minute, second);
+        const utcString = testDate.toISOString();
+        
+        return {
+            utc: utcString,
+            timezone: timezone
+        };
+    }
+    
+    // Legacy format: "2026-02-08T08:18:30.317Z" or "2026-02-08 14:28:29+0800"
+    // Keep as-is for backward compatibility
+    return formattedValue;
+}
+
 // Format timestamp for API response
 // Handles multiple storage formats:
 // - UTC ISO: "2026-02-08T08:18:30.317Z" -> returns {value, type: 'createdAt'}
@@ -393,14 +451,14 @@ export class KnowledgeGraphManager {
                 observations: rawObservations.map(o => ({
                     id: o.id,
                     content: o.content,
-                    createdAt: formatTimestamp(o.createdAt)?.value || null
+                    createdAt: parseTimestampToStorage(o.createdAt)
                 })),
                 definitions: rawDefinitions.map(d => ({
                     entityName: d.entityName,
                     content: d.content,
                     source: d.source || null,
-                    createdAt: formatTimestamp(d.createdAt)?.value || null,
-                    updatedAt: formatTimestamp(d.updatedAt)?.value || null
+                    createdAt: parseTimestampToStorage(d.createdAt),
+                    updatedAt: parseTimestampToStorage(d.updatedAt)
                 })),
                 relations: rawRelations.map(r => ({
                     from: r.from,
