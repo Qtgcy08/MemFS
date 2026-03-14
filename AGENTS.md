@@ -214,10 +214,10 @@ src/tfidf/
 ### Field Weights
 | Field | Weight | Rationale |
 |-------|--------|-----------|
-| name | 3.0 | Highest - entity identifier |
-| entityType | 2.0 | Category information |
-| definition | 2.0 | Detailed description |
-| observation | 2.0 | Supplementary info - enhanced for relevance |
+| name | 5.0 | Highest - entity identifier |
+| entityType | 4.0 | Category information |
+| definition | 4.0 | Detailed description |
+| observation | 3.0 | Supplementary info - enhanced for relevance |
 
 ### Search Configuration
 ```javascript
@@ -275,3 +275,39 @@ src/tfidf/
 - File locks not supported on Windows (EBUSY error)
 - Acceptable for MCP server (single-process usage)
 - Documented with humor in code comments
+
+## Publishing
+
+### Using publish-new Skill
+This project uses the `publish-new` skill for automated releases. To publish:
+
+```bash
+# Trigger the skill by saying:
+# "使用 publish-new skill 发布新版本"
+```
+
+The skill will:
+1. Analyze git diff to determine version bump (feat→minor, fix→patch, BREAKING CHANGE→major)
+2. Update package.json version
+3. Commit to GitHub
+4. Publish to npm
+
+### Manual Publishing
+```bash
+# Update version in package.json
+npm version patch  # or minor/major
+
+# Publish to npm
+npm publish
+
+# Push to GitHub
+git push origin master
+```
+
+### Version Rules
+| Change Type | Version Bump | npm Publish |
+|-------------|--------------|-------------|
+| feat | minor | ✅ Yes |
+| fix | patch | ✅ Yes |
+| BREAKING CHANGE | major | ✅ Yes |
+| docs/chore | none | ❌ GitHub only |
