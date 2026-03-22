@@ -44,8 +44,9 @@ npm install
 # 3. Run server
 node index.js
 
-# Or specify custom storage directory
+# Or specify custom storage path
 MEMORY_DIR=~/my-knowledge
+MEMORY_FILE_PATH=./custom/memory.jsonl
 ```
 
 ### Configure as MCP Server
@@ -286,6 +287,7 @@ await updateNode({
 |--------|------|
 | Default | `~/.memory/memory.jsonl` |
 | Custom directory | `MEMORY_DIR=/path/to/data` |
+| Custom path | `MEMORY_FILE_PATH=/path/to/file.jsonl` |
 
 ---
 
@@ -336,16 +338,6 @@ So:
 - **Expose as tools**: 16 MCP tools, LLM calls on demand
 
 **Result?** — A quiet, efficient, unobtrusive knowledge management tool.
-
----
-
-## 📄 Technical Documentation
-
-📄 Want to learn more technical details? Check out these documents:
-
-- [Technical Report](./docs/MemFS_TechnicalReport.md) - Overall architecture and design
-- [Metadata & Time History](./docs/Metadata_of_time_history.md) - Timestamp evolution and IANA timezone handling
-- [searchNode Technical Report](./docs/searchNode_TechnicalReport.md) - BM25 + Fuzzy hybrid search algorithm
 
 ---
 
