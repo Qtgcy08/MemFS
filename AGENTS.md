@@ -29,9 +29,6 @@ node index.js
 ```bash
 # Using directory
 MEMORY_DIR=/path/to/data node index.js
-
-# Using full file path
-MEMORY_FILE_PATH=/path/to/memory.jsonl node index.js
 ```
 
 ### Testing
