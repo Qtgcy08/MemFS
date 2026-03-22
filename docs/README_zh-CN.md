@@ -42,9 +42,8 @@ npm install
 # 3. 运行服务器
 node index.js
 
-# 或者指定自定义存储路径
+# 或者指定自定义存储目录
 MEMORY_DIR=~/my-knowledge
-MEMORY_FILE_PATH=./custom/memory.jsonl
 ```
 
 ### 配置为 MCP 服务器
@@ -285,7 +284,6 @@ await updateNode({
 | ----- | -------------------------------------- |
 | 默认    | `~/.memory/memory.jsonl`               |
 | 自定义目录 | `MEMORY_DIR=/path/to/data`             |
-| 自定义路径 | `MEMORY_FILE_PATH=/path/to/file.jsonl` |
 
 ---
 

@@ -44,9 +44,8 @@ npm install
 # 3. Run server
 node index.js
 
-# Or specify custom storage path
+# Or specify custom storage directory
 MEMORY_DIR=~/my-knowledge
-MEMORY_FILE_PATH=./custom/memory.jsonl
 ```
 
 ### Configure as MCP Server
@@ -287,7 +286,6 @@ await updateNode({
 |--------|------|
 | Default | `~/.memory/memory.jsonl` |
 | Custom directory | `MEMORY_DIR=/path/to/data` |
-| Custom path | `MEMORY_FILE_PATH=/path/to/file.jsonl` |
 
 ---
 
