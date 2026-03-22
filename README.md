@@ -46,6 +46,9 @@ node index.js
 
 # Or specify custom storage directory
 MEMORY_DIR=~/my-knowledge
+
+# Enable Git auto-sync (auto-commits on every save)
+GITSYNC=true node index.js
 ```
 
 ### Configure as MCP Server
@@ -172,6 +175,12 @@ flowchart TD
 | `getOrphanObservation` | Find orphan observations | Discover invalid data |
 | `recycleObservation` | Permanently delete observations | Clean up unused data |
 
+### Auxiliary
+
+| Tool | Function | Example |
+|------|----------|---------|
+| `getConsole` | Get console messages and Git commit logs | View auto-commit history |
+
 ---
 
 ## 🔍 Hybrid Search (searchNode)
@@ -286,6 +295,55 @@ await updateNode({
 |--------|------|
 | Default | `~/.memory/memory.jsonl` |
 | Custom directory | `MEMORY_DIR=/path/to/data` |
+
+### Environment Variables
+
+| Variable | Description | Default | Status |
+|----------|-------------|---------|--------|
+| `MEMORY_DIR` | Data storage directory | `~/.memory` | ✅ Recommended |
+| `MEMORY_FILE_PATH` | Full file path (deprecated) | `~/.memory/memory.jsonl` | ⚠️ Deprecated |
+| `GITAUTOCOMMIT` | Enable Git auto-commit on every save | `false` | ✅ Recommended |
+
+---
+
+## 🔄 Git Auto-Sync
+
+When enabled, every save to the memory file is automatically committed to Git for version control.
+
+```bash
+# Enable Git auto-commit
+GITAUTOCOMMIT=true node index.js
+
+# Or in MCP config
+{
+  "environment": {
+    "MEMORY_DIR": "/path/to/data",
+    "GITAUTOCOMMIT": "true"
+  }
+}
+```
+
+### Commit Format
+
+```
+chore: auto-sync (operation_type details) at UTC YYYY-MM-DDTHH:mm:ss.SSSZ
+```
+
+Example:
+```
+chore: auto-sync (createEntity Weber) at UTC 2026-03-22T09:15:30.123Z
+chore: auto-sync (updateNode Durkheim) at UTC 2026-03-22T09:16:45.456Z
+chore: auto-sync (deleteRelation Weber→Durkheim) at UTC 2026-03-22T09:17:00.789Z
+```
+
+### View Commit History
+
+Use `getConsole` tool:
+
+```javascript
+await getConsole()
+// Returns: { messages: [...], gitLog: "commit message\ncommit message\n..." }
+```
 
 ---
 
