@@ -42,9 +42,8 @@ npm install
 # 3. 运行服务器
 node index.js
 
-# 或者指定自定义存储路径
+# 或者指定自定义存储目录
 MEMORY_DIR=~/my-knowledge
-MEMORY_FILE_PATH=./custom/memory.jsonl
 ```
 
 ### 配置为 MCP 服务器
@@ -285,7 +284,6 @@ await updateNode({
 | ----- | -------------------------------------- |
 | 默认    | `~/.memory/memory.jsonl`               |
 | 自定义目录 | `MEMORY_DIR=/path/to/data`             |
-| 自定义路径 | `MEMORY_FILE_PATH=/path/to/file.jsonl` |
 
 ---
 
@@ -336,6 +334,16 @@ node test_observation_search.mjs
 - **工具化暴露**：16 个 MCP 工具，LLM 按需调用
 
 **结果？** —— 一个安静、高效、不打扰的知识管理工具。
+
+---
+
+## 📄 技术文档
+
+📄 想了解更多技术细节？欢迎阅读：
+
+- [技术报告](./docs/MemFS_TechnicalReport.md) - 整体架构与设计
+- [时间元数据演进](./docs/Metadata_of_time_history.md) - 时间戳演进与 IANA 时区处理
+- [searchNode 技术报告](./docs/searchNode_TechnicalReport.md) - BM25 + 模糊搜索混合算法
 
 ---
 
