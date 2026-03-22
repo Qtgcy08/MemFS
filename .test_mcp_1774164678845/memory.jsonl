@@ -1,0 +1,18 @@
+{"type":"entity","name":"JavaScript","entityType":"language","definition":"一种广泛使用的脚本语言（已更新）","definitionSource":"https://developer.mozilla.org/","observationIds":[1,2]}
+{"type":"entity","name":"TypeScript","entityType":"language","definition":"JavaScript的超集，添加了类型系统","definitionSource":null,"observationIds":[3,4]}
+{"type":"entity","name":"React","entityType":"framework","definition":"用于构建用户界面的JavaScript库","definitionSource":null,"observationIds":[5,6,8]}
+{"type":"entity","name":"TimestampTest","entityType":"test","definition":"测试时间戳","definitionSource":null,"observationIds":[10,11]}
+{"type":"observation","id":1,"content":"由Brendan Eich创建于1995年","createdAt":{"utc":"2026-03-22T07:31:19.901Z","timezone":"Asia/Shanghai"}}
+{"type":"observation","id":2,"content":"广泛用于前端","createdAt":{"utc":"2026-03-22T07:31:19.901Z","timezone":"Asia/Shanghai"}}
+{"type":"observation","id":3,"content":"由微软开发","createdAt":{"utc":"2026-03-22T07:31:19.901Z","timezone":"Asia/Shanghai"}}
+{"type":"observation","id":4,"content":"编译为JavaScript","createdAt":{"utc":"2026-03-22T07:31:19.902Z","timezone":"Asia/Shanghai"}}
+{"type":"observation","id":5,"content":"由Meta开发","createdAt":{"utc":"2026-03-22T07:31:19.902Z","timezone":"Asia/Shanghai"}}
+{"type":"observation","id":6,"content":"使用JSX","createdAt":{"utc":"2026-03-22T07:31:19.902Z","timezone":"Asia/Shanghai"}}
+{"type":"observation","id":7,"content":"测试删除","createdAt":{"utc":"2026-03-22T07:31:20.750Z","timezone":"Asia/Shanghai"}}
+{"type":"observation","id":8,"content":"使用虚拟DOM","createdAt":{"utc":"2026-03-22T07:31:21.124Z","timezone":"Asia/Shanghai"}}
+{"type":"observation","id":9,"content":"将被删除的观察","createdAt":{"utc":"2026-03-22T07:31:21.308Z","timezone":"Asia/Shanghai"}}
+{"type":"observation","id":10,"content":"观察1","createdAt":{"utc":"2026-03-22T07:31:21.696Z","timezone":"Asia/Shanghai"}}
+{"type":"observation","id":11,"content":"观察2","createdAt":{"utc":"2026-03-22T07:31:21.696Z","timezone":"Asia/Shanghai"}}
+{"type":"relation","from":"React","to":"JavaScript","relationType":"builds_on"}
+{"type":"relation","from":"React","to":"TypeScript","relationType":"builds_on"}
+{"type":"relation","from":"TypeScript","to":"JavaScript","relationType":"compiles_to"}

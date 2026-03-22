@@ -44,6 +44,9 @@ node index.js
 
 # 或者指定自定义存储目录
 MEMORY_DIR=~/my-knowledge
+
+# 启用 Git 自动同步（每次保存自动提交）
+GITAUTOCOMMIT=true node index.js
 ```
 
 ### 配置为 MCP 服务器
@@ -170,6 +173,12 @@ flowchart TD
 | `getOrphanObservation` | 查找孤儿观察       | 发现无效数据 |
 | `recycleObservation`   | 回收并永久删除观察    | 清理无用数据 |
 
+### 辅助工具
+
+| 工具          | 功能                    | 示例              |
+| ----------- | --------------------- | ---------------- |
+| `getConsole` | 获取控制台消息和 Git 提交日志   | 查看自动提交历史     |
+
 ---
 
 ## 🔍 混合搜索（searchNode）
@@ -284,6 +293,55 @@ await updateNode({
 | ----- | -------------------------------------- |
 | 默认    | `~/.memory/memory.jsonl`               |
 | 自定义目录 | `MEMORY_DIR=/path/to/data`             |
+
+### 环境变量
+
+| 变量              | 说明                    | 默认值              | 状态   |
+| --------------- | --------------------- | ---------------- | ---- |
+| `MEMORY_DIR`    | 数据存储目录                | `~/.memory`      | ✅ 推荐 |
+| `MEMORY_FILE_PATH` | 完整文件路径（已废弃）        | `~/.memory/memory.jsonl` | ⚠️ 废弃 |
+| `GITAUTOCOMMIT` | 启用 Git 自动提交（每次保存自动提交） | `false` | ✅ 推荐 |
+
+---
+
+## 🔄 Git 自动同步
+
+启用后，每次保存记忆文件都会自动提交到 Git，便于追踪变更历史。
+
+```bash
+# 启用 Git 自动提交
+GITAUTOCOMMIT=true node index.js
+
+# 或者在 MCP 配置中
+{
+  "environment": {
+    "MEMORY_DIR": "/path/to/data",
+    "GITAUTOCOMMIT": "true"
+  }
+}
+```
+
+### 提交格式
+
+```
+chore: auto-sync (操作类型 操作详情) at UTC YYYY-MM-DDTHH:mm:ss.SSSZ
+```
+
+示例：
+```
+chore: auto-sync (createEntity 韦伯) at UTC 2026-03-22T09:15:30.123Z
+chore: auto-sync (updateNode 涂尔干) at UTC 2026-03-22T09:16:45.456Z
+chore: auto-sync (deleteRelation 韦伯→涂尔干) at UTC 2026-03-22T09:17:00.789Z
+```
+
+### 查看提交历史
+
+使用 `getConsole` 工具获取 Git 日志：
+
+```javascript
+await getConsole()
+// 返回: { messages: [...], gitLog: "commit message\ncommit message\n..." }
+```
 
 ---
 

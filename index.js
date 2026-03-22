@@ -7,6 +7,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
+import { execSync, execFileSync } from 'child_process';
 
 // Import search modules
 import { SearchIntegrator } from './src/tfidf/searchIntegrator.js';
@@ -37,8 +38,13 @@ export async function ensureMemoryFilePath() {
             : path.join(getHomeDir(), process.env.MEMORY_DIR);
         return path.join(customDir, 'memory.jsonl');
     }
-    // Check for custom file path via MEMORY_FILE_PATH environment variable
+    // Check for custom file path via MEMORY_FILE_PATH environment variable (DEPRECATED)
     if (process.env.MEMORY_FILE_PATH) {
+        console.error('[Deprecation Warning] MEMORY_FILE_PATH is deprecated and will be removed in v2.0.');
+        console.error('[Deprecation Warning] Please migrate to MEMORY_DIR instead. Example:');
+        console.error('[Deprecation Warning]   1. Rename your memory file to memory.jsonl');
+        console.error('[Deprecation Warning]   2. Move it to a dedicated folder');
+        console.error('[Deprecation Warning]   3. Use: MEMORY_DIR=/path/to/folder node index.js');
         return path.isAbsolute(process.env.MEMORY_FILE_PATH)
             ? process.env.MEMORY_FILE_PATH
             : path.join(path.dirname(fileURLToPath(import.meta.url)), process.env.MEMORY_FILE_PATH);
@@ -67,6 +73,168 @@ export async function ensureMemoryFilePath() {
         return newMemoryPath;
     }
 }
+
+// Git Sync 功能 - 自动提交记忆文件到 git
+// Git Sync feature - auto-commit memory file to git
+const gitSync = {
+    enabled: false,
+    initialized: false,
+    memoryDir: null,
+    
+    // Check if git sync is enabled
+    isEnabled() {
+        if (this.enabled) return true;
+        const gitsync = process.env.GITAUTOCOMMIT;
+        this.enabled = (gitsync === 'true' || gitsync === '1' || gitsync?.toLowerCase() === 'yes');
+        return this.enabled;
+    },
+    
+    // Log to console buffer (for getConsole tool)
+    log(level, message) {
+        consoleBuffer.push({ level, message, timestamp: Date.now() });
+        if (level === 'error') {
+            console.error(`[GitSync] ${message}`);
+        } else {
+            console.error(`[GitSync] ${message}`);
+        }
+    },
+    
+    // Execute git command
+    execGit(args, cwd) {
+        try {
+            // Use execFileSync instead of execSync to properly handle arguments with spaces
+            // execSync with string concatenation fails on Windows when args contain spaces
+            const result = execFileSync('git', args, { 
+                cwd, 
+                encoding: 'utf8',
+                stdio: ['pipe', 'pipe', 'pipe']
+            });
+            return { success: true, output: result || '' };
+        } catch (error) {
+            // execFileSync throws on non-zero exit, capture full error info
+            const exitCode = error.status !== undefined ? error.status : 'unknown';
+            const stderr = error.stderr ? error.stderr.toString() : '';
+            const message = error.message || 'Unknown error';
+            return { 
+                success: false, 
+                error: `[exit:${exitCode}] ${message}${stderr ? ' stderr: ' + stderr : ''}`,
+                exitCode,
+                stderr
+            };
+        }
+    },
+    
+    // Check if git is installed
+    async isGitInstalled() {
+        const result = await this.execGit(['--version']);
+        return result.success;
+    },
+    
+    // Check if directory is a git repo (not just inside one)
+    async isGitRepo(dir) {
+        // Check if .git exists specifically in this directory
+        const gitDir = path.join(dir, '.git');
+        try {
+            const stat = await fs.stat(gitDir);
+            return stat.isDirectory();
+        } catch {
+            // .git doesn't exist in this directory
+            return false;
+        }
+    },
+    
+    // Initialize git repo in memory directory
+    async initRepo(dir) {
+        if (this.initialized) return true;
+        
+        this.memoryDir = dir;
+        
+        // Check if git is installed
+        if (!await this.isGitInstalled()) {
+            this.log('warn', 'Git not installed, git sync disabled');
+            return false;
+        }
+        
+        // Check if already a git repo
+        if (await this.isGitRepo(dir)) {
+            this.log('info', 'Git repo already exists at ' + dir);
+            this.initialized = true;
+            return true;
+        }
+        
+        // Initialize new git repo
+        const result = await this.execGit(['init'], dir);
+        if (result.success) {
+            this.log('info', 'Initialized new git repo at ' + dir);
+            
+            // Configure user (required for commits)
+            await this.execGit(['config', 'user.email', 'memfs@local'], dir);
+            await this.execGit(['config', 'user.name', 'MemFS Auto-Sync'], dir);
+            
+            // Note: We don't create initial commit here because memory.jsonl
+            // may not exist yet. autoCommit will handle commits when files are created.
+            this.log('info', 'Git repo ready, waiting for first change to commit');
+            
+            this.initialized = true;
+            return true;
+        } else {
+            this.log('error', 'Failed to initialize git repo: ' + result.error);
+            return false;
+        }
+    },
+    
+    // Auto-commit memory file changes
+    async autoCommit(memoryFilePath, operationContext = null) {
+        try {
+            console.error('[GitSync] autoCommit called, enabled:', this.enabled, 'initialized:', this.initialized);
+            if (!this.isEnabled()) return;
+            if (!this.initialized) return;
+            
+            const dir = this.memoryDir;
+            const fileName = path.basename(memoryFilePath);
+            
+            // Check if file exists
+            try {
+                await fs.access(memoryFilePath);
+            } catch {
+                console.error('[GitSync] File does not exist yet');
+                return; // File doesn't exist yet
+            }
+            
+            // git add
+            const addResult = this.execGit(['add', fileName], dir);
+            console.error('[GitSync] git add result:', addResult.success, addResult.output || addResult.error);
+            if (!addResult.success) {
+                this.log('warn', 'Failed to git add: ' + addResult.error);
+                return;
+            }
+            
+            // Check if there are changes to commit
+            const statusResult = this.execGit(['status', '--porcelain'], dir);
+            console.error('[GitSync] git status result:', statusResult.success, 'output:', statusResult.output);
+            if (!statusResult.success || !statusResult.output.trim()) {
+                console.error('[GitSync] No changes to commit');
+                return; // No changes to commit
+            }
+            
+            // git commit with timestamp and operation context
+            // Format: chore: auto-sync (opType details) at UTC YYYY-MM-DDTHH:mm:ssZ
+            const timestamp = new Date().toISOString(); // ISO 8601 UTC format
+            const opInfo = operationContext ? ` (${operationContext})` : '';
+            const commitMsg = `chore: auto-sync${opInfo} at UTC ${timestamp}`;
+            
+            const commitResult = this.execGit(['commit', '-m', commitMsg], dir);
+            if (commitResult.success) {
+                this.log('info', `Auto-committed: ${commitMsg}`);
+            } else {
+                this.log('warn', 'Failed to commit: ' + commitResult.error);
+            }
+        } catch (e) {
+            console.error('[GitSync] autoCommit exception:', e.message, e.stack);
+        }
+    }
+};
+
 // Initialize memory file path (will be set during startup)
 let MEMORY_FILE_PATH;
 // Helper function to format observations - conditionally include createdAt
@@ -294,12 +462,22 @@ export class KnowledgeGraphManager {
     cache;
     fileLock;
     searchIntegrator;  // Reference to searchIntegrator for index rebuild on data changes
+    lastOperation;     // Track last operation for git commit message
     constructor(memoryFilePath, searchIntegrator = null) {
         this.memoryFilePath = memoryFilePath;
         this.cache = null;  // Simple memory cache: { data, mtime, timestamp }
         this.fileLock = null;  // File lock state
         this.isWindows = process.platform === 'win32';
         this.searchIntegrator = searchIntegrator;
+        this.lastOperation = null;
+    }
+
+    // Set operation context for git commit message (auto-truncated)
+    _setOperation(opType, ...details) {
+        const detail = details.length > 0 ? ' ' + details.join(', ') : '';
+        // Truncate to 50 chars max for commit message
+        const full = `${opType}${detail}`;
+        this.lastOperation = full.length > 50 ? full.substring(0, 47) + '...' : full;
     }
     
     // Clear cache
@@ -535,6 +713,11 @@ export class KnowledgeGraphManager {
         if (this.searchIntegrator) {
             await this.searchIntegrator.rebuildIndex();
         }
+        
+        // Auto-commit to git if enabled
+        console.error('[GitSync] About to call autoCommit');
+        await gitSync.autoCommit(this.memoryFilePath, this.lastOperation);
+        console.error('[GitSync] autoCommit returned');
     }
     async createEntity(entities) {
         const graph = await this.loadGraph();
@@ -592,6 +775,10 @@ export class KnowledgeGraphManager {
             });
         }
         
+        // Set operation context for git commit
+        const newNames = newEntities.map(e => e.name);
+        this._setOperation('createEntity', ...newNames);
+        
         await this.saveGraph(graph);
         
         // Build result message
@@ -616,6 +803,11 @@ export class KnowledgeGraphManager {
             existingRelation.to === r.to &&
             existingRelation.relationType === r.relationType));
         graph.relations.push(...newRelations);
+        
+        // Set operation context for git commit
+        const relDescs = newRelations.map(r => `${r.relationType}: ${r.from}→${r.to}`);
+        this._setOperation('createRelation', ...relDescs);
+        
         await this.saveGraph(graph);
         return newRelations;
     }
@@ -665,6 +857,9 @@ export class KnowledgeGraphManager {
             });
         }
         
+        // Set operation context for git commit
+        this._setOperation('addObservation', ...results.map(r => r.entityName));
+        
         await this.saveGraph(graph);
         return results;
     }
@@ -672,6 +867,10 @@ export class KnowledgeGraphManager {
         const graph = await this.loadGraph();
         graph.entities = graph.entities.filter(e => !entityNames.includes(e.name));
         graph.relations = graph.relations.filter(r => !entityNames.includes(r.from) && !entityNames.includes(r.to));
+        
+        // Set operation context for git commit
+        this._setOperation('deleteEntity', ...entityNames);
+        
         await this.saveGraph(graph);
     }
     async deleteObservation(observations) {
@@ -730,6 +929,15 @@ export class KnowledgeGraphManager {
             }
         }
         
+        // Set operation context for git commit
+        // Include entity names for better traceability
+        const opDetails = observations.map(o => {
+            const obsPreview = o.observation.length > 15 ? o.observation.substring(0, 12) + '...' : o.observation;
+            const entityList = (o.entityNames || []).join(',');
+            return entityList ? `${obsPreview} from ${entityList}` : obsPreview;
+        }).slice(0, 3);
+        this._setOperation('deleteObservation', ...opDetails);
+        
         await this.saveGraph(graph);
         
         return {
@@ -743,6 +951,11 @@ export class KnowledgeGraphManager {
         graph.relations = graph.relations.filter(r => !relations.some(delRelation => r.from === delRelation.from &&
             r.to === delRelation.to &&
             r.relationType === delRelation.relationType));
+        
+        // Set operation context for git commit
+        const relDescs = relations.map(r => `${r.from}→${r.to}`);
+        this._setOperation('deleteRelation', ...relDescs);
+        
         await this.saveGraph(graph);
     }
     async recycleObservation(observationIds, force = false) {
@@ -806,6 +1019,9 @@ export class KnowledgeGraphManager {
             }
         }
 
+        // Set operation context for git commit
+        this._setOperation('recycleObservation', `deleted:${deleted.length},skipped:${skipped.length}`);
+
         await this.saveGraph(graph);
 
         return {
@@ -839,6 +1055,10 @@ export class KnowledgeGraphManager {
             // Create new definition
             graph.definitions.push(definition);
         }
+        
+        // Set operation context for git commit
+        this._setOperation('setDefinition', entityName);
+        
         await this.saveGraph(graph);
     }
     async updateNode(updates) {
@@ -939,6 +1159,10 @@ export class KnowledgeGraphManager {
             });
         }
         
+        // Set operation context for git commit
+        const updatedNames = updates.map(u => u.entityName);
+        this._setOperation('updateNode', ...updatedNames);
+        
         await this.saveGraph(graph);
         return results;
     }
@@ -975,6 +1199,10 @@ export class KnowledgeGraphManager {
         const linkedEntities = graph.entities
             .filter(e => e.observationIds?.includes(observationId))
             .map(e => e.name);
+        
+        // Set operation context for git commit
+        const contentPreview = newContent.length > 20 ? newContent.substring(0, 17) + '...' : newContent;
+        this._setOperation('updateObservation', String(observationId), contentPreview);
         
         await this.saveGraph(graph);
         
@@ -1272,9 +1500,49 @@ const ObservationSchema = z.object({
     createdAt: z.string().nullable()
 });
 // The server instance and tools exposed to Claude
+const VERSION = "2.4.12";
 const server = new McpServer({
     name: "MemFS",
-    version: "1.21.1",
+    version: VERSION,
+});
+// Console buffer for getConsole tool
+const consoleBuffer = [];
+// Override console.error to capture messages
+const originalConsoleError = console.error;
+console.error = (...args) => {
+    consoleBuffer.push({ level: 'error', message: args.join(' '), timestamp: Date.now() });
+    originalConsoleError.apply(console, args);
+};
+// Register getConsole tool
+server.registerTool("getConsole", {
+    title: "Get Console",
+    description: "Retrieve buffered console messages and recent git commits from the server. Call this after other tools to see warnings, deprecation notices, and git sync status.",
+    inputSchema: {},
+    outputSchema: {
+        messages: z.array(z.object({
+            level: z.string(),
+            message: z.string(),
+            timestamp: z.number()
+        })),
+        gitLog: z.string().optional()
+    }
+}, async () => {
+    const messages = consoleBuffer.splice(0);
+    
+    // Get recent git log if git sync is enabled and initialized
+    let gitLog = null;
+    if (gitSync.isEnabled() && gitSync.initialized) {
+        const logResult = await gitSync.execGit(['log', '--oneline', '-10'], gitSync.memoryDir);
+        if (logResult.success) {
+            gitLog = logResult.output.trim();
+        }
+    }
+    
+    const result = { messages, ...(gitLog && { gitLog }) };
+    return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        structuredContent: result
+    };
 });
 // Register create_entities tool
 server.registerTool("createEntity", {
@@ -1727,7 +1995,7 @@ server.registerTool("listNode", {
 }, async () => {
     const nodes = await knowledgeGraphManager.listNode();
     return {
-        content: [{ type: "text", text: JSON.stringify(nodes, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify(nodes) }],
         structuredContent: { nodes }
     };
 });
@@ -1779,6 +2047,10 @@ async function main() {
             throw err;
         }
     }
+    // Initialize git sync if enabled
+    if (gitSync.isEnabled()) {
+        await gitSync.initRepo(memoryDir);
+    }
     // Initialize knowledge graph manager first (without searchIntegrator reference yet)
     knowledgeGraphManager = new KnowledgeGraphManager(MEMORY_FILE_PATH);
     // Initialize search integrator for TF-IDF + Fuse.js hybrid search
@@ -1787,7 +2059,7 @@ async function main() {
     knowledgeGraphManager.searchIntegrator = searchIntegrator;
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.error("Knowledge Graph MCP Server running on stdio");
+    console.error(`MemFS v${VERSION} running on stdio`);
 }
 main().catch((error) => {
     console.error("Fatal error in main():", error);
