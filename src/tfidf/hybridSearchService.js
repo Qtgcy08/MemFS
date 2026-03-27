@@ -115,8 +115,9 @@ export class HybridSearchService {
         this.tfidfSearcher = new NaturalTfIdfSearcher({
             fieldWeights: {
                 'name': 5.0,
-                'entityType': 4.0,
-                'definition': 4.0,
+                'entityType': 2.5,
+                'definition': 2.5,
+                'definitionSource': 1.5,
                 'observation': 3.0
             }
         });

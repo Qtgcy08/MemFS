@@ -103,8 +103,9 @@ export class NaturalTfIdfSearcher {
             // Field weights
             fieldWeights: options.fieldWeights || {
                 'name': 3.0,         // Entity name - highest weight
-                'entityType': 2.0,   // Entity type
-                'definition': 2.0,   // Definition
+                'entityType': 2.5,   // Entity type
+                'definition': 2.5,   // Definition
+                'definitionSource': 1.5,  // Definition source
                 'observation': 2.0    // Observation
             },
             ...options
@@ -146,6 +147,13 @@ export class NaturalTfIdfSearcher {
         entities.forEach(entity => {
             if (entity.definition) {
                 this._addDocument(entity.definition, entity.name, 'definition', entity);
+            }
+        });
+
+        // Index definition sources
+        entities.forEach(entity => {
+            if (entity.definitionSource) {
+                this._addDocument(entity.definitionSource, entity.name, 'definitionSource', entity);
             }
         });
 
