@@ -181,12 +181,9 @@ export class SearchIntegrator {
 
         const directEntityNames = new Set(entityNames);  // Directly matched entities
 
-        // Clean query terms for relation matching
-        const cleanedQuery = query
-            .replace(/[\u3000-\u303f\uff00-\uffef!@#$%^&*()=\[\]{}|;':",.\/<>?`~\\]/g, '')
-            .replace(/\s+/g, ' ')
-            .trim();
-        const queryTerms = cleanedQuery.toLowerCase().split(/\s+/).filter(t => t.length >= 2);
+        // Use gram tokens from hybridService.search() for relation matching
+        // These are the processed tokens including fullQuery, bigrams, trigrams, etc.
+        const queryTerms = result.terms || [];
 
         // Base score for related entities
         const BASE_RELATED_SCORE = 0.5;
@@ -197,10 +194,10 @@ export class SearchIntegrator {
         const relationConnectedEntities = new Map();
 
         graph.relations.forEach(r => {
-            // Check if relation type matches any query term
+            // Check if relation type matches any gram token
             const relationTypeLower = r.relationType.toLowerCase();
             const relationMatchesQuery = queryTerms.some(term => 
-                relationTypeLower.includes(term)
+                relationTypeLower.includes(term.toLowerCase())
             );
             const scoreBoost = relationMatchesQuery ? RELATION_MATCH_BOOST : BASE_RELATED_SCORE;
 
