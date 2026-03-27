@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>searchNode Debug Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --bg-hover: #30363d;
+            --border: #30363d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --text-muted: #6e7681;
+            --accent: #58a6ff;
+            --accent-dim: #1f6feb;
+            --success: #3fb950;
+            --warning: #d29922;
+            --error: #f85149;
+            --gram-2: #7ee787;
+            --gram-3: #a5d6ff;
+            --gram-4: #d2a8ff;
+            --gram-full: #ffa657;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans SC', 'JetBrains Mono', monospace;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Header / Search Bar */
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 20px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .header-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .header-title::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            background: var(--accent);
+            border-radius: 50%;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .search-container {
+            display: flex;
+            gap: 12px;
+        }
+
+        .search-input-wrapper {
+            flex: 1;
+            position: relative;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 14px 18px 14px 44px;
+            font-family: inherit;
+            font-size: 15px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .search-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+        }
+
+        .search-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-muted);
+            pointer-events: none;
+        }
+
+        .search-btn {
+            padding: 14px 28px;
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 600;
+            background: var(--accent-dim);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .search-btn:hover {
+            background: var(--accent);
+        }
+
+        .search-btn:active {
+            transform: scale(0.98);
+        }
+
+        .search-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .options-row {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .option-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .option-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .option-input {
+            width: 60px;
+            padding: 6px 10px;
+            font-family: inherit;
+            font-size: 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-primary);
+            text-align: center;
+        }
+
+        /* Main Content */
+        .main {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 420px;
+            gap: 0;
+            overflow: hidden;
+        }
+
+        /* Results Panel */
+        .results-panel {
+            border-right: 1px solid var(--border);
+            overflow-y: auto;
+            background: var(--bg-primary);
+        }
+
+        .panel-header {
+            position: sticky;
+            top: 0;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 20px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            z-index: 10;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .results-count {
+            font-weight: 400;
+            color: var(--text-muted);
+        }
+
+        .entity-card {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .entity-card:hover {
+            background: var(--bg-secondary);
+        }
+
+        .entity-card.selected {
+            background: var(--bg-tertiary);
+            border-left: 3px solid var(--accent);
+        }
+
+        .entity-name {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .entity-type {
+            font-size: 11px;
+            padding: 2px 8px;
+            background: var(--bg-hover);
+            border-radius: 4px;
+            color: var(--text-secondary);
+            font-weight: 400;
+        }
+
+        .entity-definition {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .entity-meta {
+            margin-top: 8px;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 300px;
+            color: var(--text-muted);
+            text-align: center;
+            padding: 40px;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        /* Debug Panel */
+        .debug-panel {
+            background: var(--bg-secondary);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .debug-section {
+            border-bottom: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .debug-section-header {
+            padding: 12px 16px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            background: var(--bg-tertiary);
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            user-select: none;
+        }
+
+        .debug-section-header:hover {
+            background: var(--bg-hover);
+        }
+
+        .debug-section-content {
+            padding: 16px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            overflow-y: auto;
+            max-height: 300px;
+        }
+
+        .debug-section.collapsed .debug-section-content {
+            display: none;
+        }
+
+        .debug-section.collapsed .toggle-icon {
+            transform: rotate(-90deg);
+        }
+
+        .toggle-icon {
+            transition: transform 0.2s;
+        }
+
+        /* Query Analysis */
+        .query-cleaned {
+            background: var(--bg-tertiary);
+            padding: 10px 14px;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            border-left: 3px solid var(--accent);
+        }
+
+        .query-label {
+            font-size: 10px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .query-value {
+            color: var(--accent);
+            word-break: break-all;
+        }
+
+        /* Token Grid */
+        .token-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .token-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+        }
+
+        .token-item.full-query {
+            background: rgba(255, 166, 87, 0.15);
+            border-color: var(--gram-full);
+            color: var(--gram-full);
+        }
+
+        .token-item.gram-2 {
+            background: rgba(126, 231, 135, 0.1);
+            border-color: var(--gram-2);
+            color: var(--gram-2);
+        }
+
+        .token-item.gram-3 {
+            background: rgba(165, 214, 255, 0.1);
+            border-color: var(--gram-3);
+            color: var(--gram-3);
+        }
+
+        .token-item.gram-4 {
+            background: rgba(210, 168, 255, 0.1);
+            border-color: var(--gram-4);
+            color: var(--gram-4);
+        }
+
+        .token-penalty {
+            font-size: 10px;
+            opacity: 0.7;
+        }
+
+        /* Tokenization Detail */
+        .token-detail {
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            margin-bottom: 8px;
+            overflow: hidden;
+        }
+
+        .token-detail-header {
+            padding: 8px 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .token-detail-header:hover {
+            background: var(--bg-hover);
+        }
+
+        .token-detail-term {
+            font-weight: 600;
+        }
+
+        .token-detail-badges {
+            display: flex;
+            gap: 6px;
+        }
+
+        .badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-weight: 500;
+        }
+
+        .badge-full {
+            background: rgba(255, 166, 87, 0.2);
+            color: var(--gram-full);
+        }
+
+        .badge-tfidf {
+            background: rgba(126, 231, 135, 0.2);
+            color: var(--success);
+        }
+
+        .badge-fuse {
+            background: rgba(165, 214, 255, 0.2);
+            color: var(--gram-3);
+        }
+
+        .token-detail-content {
+            padding: 8px 12px;
+            border-top: 1px solid var(--border);
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .stat-item {
+            background: var(--bg-tertiary);
+            padding: 10px 12px;
+            border-radius: 6px;
+        }
+
+        .stat-label {
+            font-size: 10px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .stat-value {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        /* Scoring Info */
+        .scoring-info {
+            font-size: 11px;
+        }
+
+        .scoring-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .scoring-row:last-child {
+            border-bottom: none;
+        }
+
+        .scoring-label {
+            color: var(--text-secondary);
+        }
+
+        .scoring-value {
+            color: var(--warning);
+            font-weight: 500;
+        }
+
+        /* Loading State */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            color: var(--text-muted);
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 12px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Error State */
+        .error-message {
+            background: rgba(248, 81, 73, 0.1);
+            border: 1px solid var(--error);
+            border-radius: 8px;
+            padding: 16px;
+            color: var(--error);
+            margin: 20px;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-primary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--bg-hover);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--border);
+        }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            .main {
+                grid-template-columns: 1fr;
+            }
+            .debug-panel {
+                border-top: 1px solid var(--border);
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-title">searchNode Debug Console</div>
+        <div class="search-container">
+            <div class="search-input-wrapper">
+                <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"/>
+                    <path d="m21 21-4.35-4.35"/>
+                </svg>
+                <input type="text" class="search-input" id="searchInput" placeholder="输入搜索词，如：社会学理论 明日方舟..." autofocus>
+            </div>
+            <button class="search-btn" id="searchBtn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                搜索
+            </button>
+        </div>
+        <div class="options-row">
+            <div class="option-group">
+                <span class="option-label">limit:</span>
+                <input type="number" class="option-input" id="limitInput" value="15" min="1" max="100">
+            </div>
+            <div class="option-group">
+                <span class="option-label">bm25Weight:</span>
+                <input type="number" class="option-input" id="bm25WeightInput" value="0.7" step="0.1" min="0" max="1">
+            </div>
+            <div class="option-group">
+                <span class="option-label">fuzzyWeight:</span>
+                <input type="number" class="option-input" id="fuzzyWeightInput" value="0.3" step="0.1" min="0" max="1">
+            </div>
+            <div class="option-group">
+                <span class="option-label">minScore:</span>
+                <input type="number" class="option-input" id="minScoreInput" value="0.01" step="0.01" min="0">
+            </div>
+            <div class="option-group">
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input type="checkbox" id="timeInput" style="width: 14px; height: 14px;">
+                    <span class="option-label" style="width: auto;">time</span>
+                </label>
+            </div>
+        </div>
+    </header>
+
+    <main class="main">
+        <section class="results-panel">
+            <div class="panel-header">
+                <span>搜索结果</span>
+                <span class="results-count" id="resultsCount">0 个实体</span>
+            </div>
+            <div id="resultsContent">
+                <div class="empty-state">
+                    <div class="empty-state-icon">🔍</div>
+                    <div>输入搜索词开始调试</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="debug-panel">
+            <div class="debug-section">
+                <div class="debug-section-header" onclick="toggleSection(this)">
+                    <span>📊 统计信息</span>
+                    <svg class="toggle-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="6 9 12 15 18 9"/>
+                    </svg>
+                </div>
+                <div class="debug-section-content" id="statsContent">
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-label">候选总数</div>
+                            <div class="stat-value" id="statCandidates">-</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">返回数量</div>
+                            <div class="stat-value" id="statReturned">-</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">BM25 Weight</div>
+                            <div class="stat-value" id="statBm25">-</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">Fuzzy Weight</div>
+                            <div class="stat-value" id="statFuzzy">-</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="debug-section">
+                <div class="debug-section-header" onclick="toggleSection(this)">
+                    <span>🔤 分词结果</span>
+                    <svg class="toggle-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="6 9 12 15 18 9"/>
+                    </svg>
+                </div>
+                <div class="debug-section-content" id="tokenContent">
+                    <div class="query-cleaned">
+                        <div class="query-label">清洗后查询</div>
+                        <div class="query-value" id="cleanedQuery">-</div>
+                    </div>
+                    <div class="token-grid" id="tokenGrid">-</div>
+                </div>
+            </div>
+
+            <div class="debug-section">
+                <div class="debug-section-header" onclick="toggleSection(this)">
+                    <span>📝 分词详情</span>
+                    <svg class="toggle-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="6 9 12 15 18 9"/>
+                    </svg>
+                </div>
+                <div class="debug-section-content" id="tokenDetailContent">
+                    -
+                </div>
+            </div>
+
+            <div class="debug-section">
+                <div class="debug-section-header" onclick="toggleSection(this)">
+                    <span>⚖️ 评分机制</span>
+                    <svg class="toggle-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="6 9 12 15 18 9"/>
+                    </svg>
+                </div>
+                <div class="debug-section-content">
+                    <div class="scoring-info">
+                        <div class="scoring-row">
+                            <span class="scoring-label">fullQuery + name</span>
+                            <span class="scoring-value">10x boost</span>
+                        </div>
+                        <div class="scoring-row">
+                            <span class="scoring-label">fullQuery + 其他字段</span>
+                            <span class="scoring-value">3x boost</span>
+                        </div>
+                        <div class="scoring-row">
+                            <span class="scoring-label">普通匹配</span>
+                            <span class="scoring-value">1x</span>
+                        </div>
+                        <div class="scoring-row">
+                            <span class="scoring-label">gram 惩罚</span>
+                            <span class="scoring-value">1/e^(n-2)</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="debug-section">
+                <div class="debug-section-header" onclick="toggleSection(this)">
+                    <span>📋 原始响应</span>
+                    <svg class="toggle-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="6 9 12 15 18 9"/>
+                    </svg>
+                </div>
+                <div class="debug-section-content" id="rawResponseContent">
+                    <pre id="rawResponse" style="white-space: pre-wrap; word-break: break-all; color: var(--text-secondary);">-</pre>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script type="module">
+        // Initialize search integrator directly
+        import { SearchIntegrator } from './src/tfidf/searchIntegrator.js';
+        import { KnowledgeGraphManager } from './src/knowledgeGraphManager.js';
+
+        let manager;
+        let searchIntegrator;
+
+        async function init() {
+            manager = new KnowledgeGraphManager();
+            searchIntegrator = new SearchIntegrator(manager);
+            await searchIntegrator.ensureIndex();
+            console.log('Search integrator initialized');
+        }
+
+        function toggleSection(header) {
+            const section = header.parentElement;
+            section.classList.toggle('collapsed');
+        }
+
+        function getGramClass(term, fullQuery, tokenPenalties) {
+            if (term === fullQuery) return 'full-query';
+            const penalty = tokenPenalties[term];
+            if (!penalty) return '';
+            if (penalty >= 1) return 'gram-2';
+            if (penalty >= 0.3) return 'gram-3';
+            return 'gram-4';
+        }
+
+        function formatPenalty(penalty) {
+            if (penalty >= 1) return '';
+            return `×${penalty.toFixed(3)}`;
+        }
+
+        function renderResults(data, showTime = false) {
+            const resultsContent = document.getElementById('resultsContent');
+            const resultsCount = document.getElementById('resultsCount');
+
+            if (!data.entities || data.entities.length === 0) {
+                resultsContent.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📭</div>
+                        <div>没有找到匹配结果</div>
+                    </div>
+                `;
+                resultsCount.textContent = '0 个实体';
+                return;
+            }
+
+            resultsCount.textContent = `${data.entities.length} 个实体`;
+            resultsContent.innerHTML = data.entities.map((entity, idx) => `
+                <div class="entity-card" data-idx="${idx}">
+                    <div class="entity-name">
+                        ${escapeHtml(entity.name)}
+                        ${entity.entityType ? `<span class="entity-type">${escapeHtml(entity.entityType)}</span>` : ''}
+                    </div>
+                    ${entity.definition ? `<div class="entity-definition">${escapeHtml(entity.definition)}</div>` : ''}
+                    ${entity.observationIds && entity.observationIds.length > 0 ? 
+                        `<div class="entity-meta">${entity.observationIds.length} 个观察</div>` : ''}
+                </div>
+            `).join('');
+        }
+
+        function renderDebugInfo(internalResult) {
+            const meta = internalResult._meta || {};
+            const debug = meta.debug || {};
+            const terms = debug.terms || [];
+            const tokenization = debug.tokenizationDetails || [];
+
+            // Stats
+            document.getElementById('statCandidates').textContent = meta.totalCandidates ?? '-';
+            document.getElementById('statReturned').textContent = meta.returnedCount ?? '-';
+            document.getElementById('statBm25').textContent = meta.bm25Weight ?? '-';
+            document.getElementById('statFuzzy').textContent = meta.fuzzyWeight ?? '-';
+
+            // Cleaned query
+            document.getElementById('cleanedQuery').textContent = internalResult.fullQuery || '-';
+
+            // Token grid - compute penalties from tokenization
+            const tokenPenalties = {};
+            const fullQuery = internalResult.fullQuery;
+            tokenization.forEach(t => {
+                if (!t.isFullQuery) {
+                    // Estimate gram length from term
+                    const gramLen = t.term.length;
+                    const penalty = 1 / Math.pow(Math.E, gramLen - 2);
+                    tokenPenalties[t.term] = penalty;
+                }
+            });
+
+            const tokenGrid = document.getElementById('tokenGrid');
+            tokenGrid.innerHTML = terms.map(term => {
+                const gramClass = getGramClass(term, fullQuery, tokenPenalties);
+                const penalty = tokenPenalties[term] || 1;
+                const penaltyStr = formatPenalty(penalty);
+                return `
+                    <span class="token-item ${gramClass}">
+                        ${escapeHtml(term)}
+                        ${penaltyStr ? `<span class="token-penalty">${penaltyStr}</span>` : ''}
+                    </span>
+                `;
+            }).join('');
+
+            // Token detail
+            const tokenDetailContent = document.getElementById('tokenDetailContent');
+            tokenDetailContent.innerHTML = tokenization.map(t => `
+                <div class="token-detail">
+                    <div class="token-detail-header">
+                        <span class="token-detail-term">${escapeHtml(t.term)}</span>
+                        <div class="token-detail-badges">
+                            ${t.isFullQuery ? '<span class="badge badge-full">FULL</span>' : ''}
+                            <span class="badge badge-tfidf">TF-IDF: ${t.tfidfCount}</span>
+                            <span class="badge badge-fuse">FUSE: ${t.fuseCount}</span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            // Raw response - filter out searchMode
+            const { searchMode, ...cleanResult } = internalResult;
+            document.getElementById('rawResponse').textContent = JSON.stringify(cleanResult, null, 2);
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/&/g, '&amp;')
+                       .replace(/</g, '&lt;')
+                       .replace(/>/g, '&gt;')
+                       .replace(/"/g, '&quot;');
+        }
+
+        async function performSearch() {
+            const query = document.getElementById('searchInput').value.trim();
+            if (!query) return;
+
+            const searchBtn = document.getElementById('searchBtn');
+            searchBtn.disabled = true;
+            searchBtn.innerHTML = '<div class="spinner"></div>搜索中...';
+
+            try {
+                const limit = parseInt(document.getElementById('limitInput').value) || 15;
+                const bm25Weight = parseFloat(document.getElementById('bm25WeightInput').value) || 0.7;
+                const fuzzyWeight = parseFloat(document.getElementById('fuzzyWeightInput').value) || 0.3;
+                const minScore = parseFloat(document.getElementById('minScoreInput').value) || 0.01;
+                const time = document.getElementById('timeInput').checked;
+
+                // Call searchIntegrator directly to get internal result with debug info
+                const result = await searchIntegrator.searchNode(query, {
+                    basicFetch: false,
+                    time,
+                    limit,
+                    bm25Weight,
+                    fuzzyWeight,
+                    minScore
+                });
+
+                // Render results and debug info
+                renderResults(result, time);
+                renderDebugInfo(result);
+
+            } catch (error) {
+                document.getElementById('resultsContent').innerHTML = `
+                    <div class="error-message">
+                        错误: ${escapeHtml(error.message)}
+                    </div>
+                `;
+                console.error('Search error:', error);
+            } finally {
+                searchBtn.disabled = false;
+                searchBtn.innerHTML = `
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="5 3 19 12 5 21 5 3"/>
+                    </svg>
+                    搜索
+                `;
+            }
+        }
+
+        // Event listeners
+        document.getElementById('searchBtn').addEventListener('click', performSearch);
+        document.getElementById('searchInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') performSearch();
+        });
+
+        // Initialize
+        init().catch(console.error);
+    </script>
+</body>
+</html>
