@@ -1803,20 +1803,14 @@ server.registerTool("searchNode", {
     // _meta 为内部调试信息，不返回给 LLM
     const { _meta, ...cleanResult } = result;
 
-    // 确保总输出数限制 (entities + observations + relations)
-    // 总输出 = limit × maxObservationsPerEntity × totalMultiplier
-    const totalLimit = maxObservationsPerEntity * limit * totalMultiplier;
-    const totalOutput = [
-        ...cleanResult.entities.map(e => ({ ...e, _type: 'entity' })),
-        ...cleanResult.observations.map(o => ({ ...o, _type: 'observation' })),
-        ...cleanResult.relations.map(r => ({ ...r, _type: 'relation' }))
-    ].slice(0, totalLimit);
-
-    // 拆分回原结构
+    // 直接使用 searchIntegrator 返回的结果，已经包含正确的限制
+    // - entities: 最多 limit 个
+    // - observations: 最多 limit × maxObservationsPerEntity 个
+    // - relations: 最多 limit × 2 个
     const limitedResult = {
-        entities: totalOutput.filter(i => i._type === 'entity').map(({ _type, ...e }) => e),
-        observations: totalOutput.filter(i => i._type === 'observation').map(({ _type, ...o }) => o),
-        relations: totalOutput.filter(i => i._type === 'relation').map(({ _type, ...r }) => r)
+        entities: cleanResult.entities,
+        observations: cleanResult.observations,
+        relations: cleanResult.relations
     };
 
     return {
