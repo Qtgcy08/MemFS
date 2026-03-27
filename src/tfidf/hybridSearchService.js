@@ -43,10 +43,14 @@ function cleanText(text) {
 /**
  * 计算 n-gram 惩罚系数
  * 长度越长，权重越低，避免长串主导匹配
+ * 2-gram 也施加 penalty，避免假阳性匹配（如 "CA" 匹配无关内容）
  * @param {number} n - N-gram size
  * @returns {number} Penalty coefficient
  */
 function getGramPenalty(n) {
+    if (n === 2) {
+        return 0.5;  // 2-gram: 50% penalty，减少假阳性
+    }
     return 1 / Math.pow(Math.E, n - 2);
 }
 
@@ -117,7 +121,7 @@ const DEFAULT_FIELD_WEIGHTS = {
     'entityType': 2.5,
     'definition': 2.5,
     'definitionSource': 1.5,
-    'observation': 3.0
+    'observation': 1.0
 };
 
 export class HybridSearchService {
@@ -176,9 +180,21 @@ export class HybridSearchService {
 
     /**
       * Search individual term
+      * @param {string} term - Search term
+      * @param {object} options - Optional: pre-computed tokens and penalties
+      * @param {string[]} options.tokens - Pre-tokenized tokens
+      * @param {number[]} options.penalties - Penalties for each token
       */
-    searchTerm(term) {
-        const tfidfResults = this.tfidfSearcher.search(term, { topK: 50 });
+    searchTerm(term, options = {}) {
+        const { tokens, penalties } = options;
+        
+        const searchOptions = { topK: 50 };
+        if (tokens) {
+            searchOptions.tokens = tokens;
+            searchOptions.tokenPenalties = penalties;
+        }
+        
+        const tfidfResults = this.tfidfSearcher.search(term, searchOptions);
 
         // Skip fuzzy search for very short terms to avoid false positives
         // TF-IDF is more precise for short terms
@@ -259,7 +275,7 @@ export class HybridSearchService {
         if (isFullQuery) {
             const nameMatched = matchedFields.some(f => f.field === 'name');
             if (nameMatched) {
-                weightMultiplier = 5.0;
+                weightMultiplier = 10.0;
                 entry.fullQueryNameMatch = true;
             } else {
                 weightMultiplier = 2.0;
@@ -381,11 +397,15 @@ export class HybridSearchService {
         }
 
         // Step 2: Search each term individually
+        // Pass pre-computed tokens and penalties to BM25 for proper scoring
         const termResults = tokens.map(term => ({
             term,
             isFullQuery: term === fullQuery,  // Mark if this is the full query
             penalty: tokenPenalties[term] || 1.0,  // Apply gram penalty
-            ...this.searchTerm(term)
+            ...this.searchTerm(term, {
+                tokens: [term],  // Use the single term as token
+                penalties: [tokenPenalties[term] || 1.0]
+            })
         }));
 
         // Step 3: Aggregate results

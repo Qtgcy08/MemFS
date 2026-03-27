@@ -272,7 +272,12 @@ export class NaturalTfIdfSearcher {
 
     /**
       * Search using BM25
-      */
+       * @param {string} query - Search query (used for debug/info if tokens provided)
+       * @param {object} options - Search options
+       * @param {string[]} [options.tokens] - Pre-tokenized query tokens (to use penalties)
+       * @param {number[]} [options.tokenPenalties] - Penalties for each token (aligned with tokens array)
+       * @param {number} [options.topK=100] - Number of results to return
+       */
     search(query, options = {}) {
         // Index is considered "built" if buildIndex was called (even if empty)
         // We track this via a separate flag instead of checking indexToDocId.length
@@ -280,10 +285,12 @@ export class NaturalTfIdfSearcher {
             throw new Error('Index not built. Call buildIndex() first.');
         }
 
-        const { topK = 100 } = options;
+        const { topK = 100, tokens: providedTokens, tokenPenalties } = options;
 
-        // Generate n-gram tokens for query
-        const queryTokens = new Set(tokenizeForIndex(query.toLowerCase()));
+        // Use provided tokens or generate new ones
+        const queryTokens = providedTokens
+            ? new Set(providedTokens)
+            : new Set(tokenizeForIndex(query.toLowerCase()));
 
         if (queryTokens.size === 0) {
             return [];
@@ -304,8 +311,16 @@ export class NaturalTfIdfSearcher {
                 const field = doc.field;
                 let docScore = 0;
 
-                queryTokens.forEach(token => {
-                    docScore += this._bm25(token, docId);
+                // Apply token penalties if provided
+                const hasPenalties = tokenPenalties && tokenPenalties.length > 0;
+                
+                queryTokens.forEach((token, index) => {
+                    const bm25Score = this._bm25(token, docId);
+                    // Apply token penalty if available
+                    const penalty = hasPenalties && tokenPenalties[index] !== undefined
+                        ? tokenPenalties[index]
+                        : 1.0;
+                    docScore += bm25Score * penalty;
                 });
 
                 // Only add this field's contribution if it actually has matches

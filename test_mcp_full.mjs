@@ -222,14 +222,17 @@ async function test() {
         section('Git Sync 功能验证');
 
         const consoleResult = await client.callTool('getConsole', {});
-        const consoleData = parseToolResult(consoleResult);
-        const messages = consoleData?.messages || [];
-        const gitCommits = messages.filter(m => m.message.includes('Auto-committed'));
-
-        assert(gitCommits.length > 0, '22. Git auto-commit 记录存在');
-        if (consoleData?.gitLog) {
-            assert(consoleData.gitLog.length > 0, '23. getConsole 返回 gitLog');
+        
+        // getConsole returns text content with git commits prefixed by "[Git] "
+        let hasGitCommit = false;
+        if (consoleResult?.content) {
+            const textContent = consoleResult.content.find(c => c.type === 'text');
+            if (textContent?.text) {
+                hasGitCommit = textContent.text.includes('[Git]');
+            }
         }
+        
+        assert(hasGitCommit, '22. Git auto-commit 记录存在');
 
         // ============================================================
         // 测试结果
