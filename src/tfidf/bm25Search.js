@@ -15,7 +15,7 @@
  */
 function generateNGram(str, n) {
     if (str.length < n) {
-        return [];  // Don't return single chars as n-gram
+        return str.length > 0 ? [str] : [];
     }
     const tokens = [];
     for (let i = 0; i <= str.length - n; i++) {
@@ -25,64 +25,41 @@ function generateNGram(str, n) {
 }
 
 /**
- * Check if text is primarily Chinese
+ * 清洗文本：去除符号和空格（与查询端统一）
  * @param {string} text - Input text
- * @returns {boolean} True if text is primarily Chinese
+ * @returns {string} Cleaned text
  */
-function isChineseText(text) {
+function cleanText(text) {
     if (!text || typeof text !== 'string') {
-        return false;
+        return '';
     }
-    // Count Chinese characters (Unicode range for Chinese)
-    const chineseChars = text.match(/[\u4e00-\u9fa5]/g) || [];
-    // Check if Chinese characters are at least 50% of non-whitespace chars
-    const nonWhitespace = text.replace(/\s/g, '');
-    if (nonWhitespace.length === 0) return false;
-    return (chineseChars.length / nonWhitespace.length) >= 0.5;
+    return text
+        .replace(/[\u3000-\u303f\uff00-\uffef!@#$%^&*()_+\-=\[\]{}|;':",.\/<>?`~\\]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 /**
- * Tokenize text for BM25 indexing
- * Uses n-gram for better Chinese/foreign language support
+ * 索引时切片预处理
+ * 遵循《苦涩的教训》：统一 2~(n-1) gram，无语言知识
  * @param {string} text - Input text
  * @returns {string[]} Tokenized terms
  */
 function tokenizeForIndex(text) {
-    if (!text || typeof text !== 'string') {
+    const cleaned = cleanText(text);
+
+    if (!cleaned) {
         return [];
     }
 
     const tokens = new Set();
 
-    // Always add full text for exact matching
-    tokens.add(text);
+    // Full text for exact matching
+    tokens.add(cleaned);
 
-    // Check if text is primarily Chinese
-    const isChinese = isChineseText(text);
-
-    if (isChinese) {
-        // For Chinese text, use 2-gram for word matching
-        if (text.length >= 2) {
-            const bigrams = generateNGram(text, 2);
-            bigrams.forEach(t => tokens.add(t));
-        }
-    } else {
-        // For English/text, start with 3-gram
-        if (text.length >= 3) {
-            const trigrams = generateNGram(text, 3);
-            trigrams.forEach(t => tokens.add(t));
-        }
-    }
-
-    // Add 4-gram and 5-gram for longer substring matching
-    if (text.length >= 4) {
-        const fourgrams = generateNGram(text, 4);
-        fourgrams.forEach(t => tokens.add(t));
-    }
-
-    if (text.length >= 5) {
-        const fivegrams = generateNGram(text, 5);
-        fivegrams.forEach(t => tokens.add(t));
+    // 2~(n-1) gram, maximum is n-1 (full text already covered)
+    for (let n = 2; n <= cleaned.length - 1; n++) {
+        generateNGram(cleaned, n).forEach(t => tokens.add(t));
     }
 
     return Array.from(tokens);

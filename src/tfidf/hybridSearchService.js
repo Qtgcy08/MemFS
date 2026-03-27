@@ -26,83 +26,83 @@ function generateNGram(str, n) {
 }
 
 /**
- * Check if text is primarily Chinese
+ * 清洗文本：去除符号和空格，统一匹配基础
  * @param {string} text - Input text
- * @returns {boolean} True if text is primarily Chinese
+ * @returns {string} Cleaned text
  */
-function isChineseText(text) {
+function cleanText(text) {
     if (!text || typeof text !== 'string') {
-        return false;
+        return '';
     }
-    // Count Chinese characters (Unicode range for Chinese)
-    const chineseChars = text.match(/[\u4e00-\u9fa5]/g) || [];
-    // Check if Chinese characters are at least 50% of non-whitespace chars
-    const nonWhitespace = text.replace(/\s/g, '');
-    if (nonWhitespace.length === 0) return false;
-    return (chineseChars.length / nonWhitespace.length) >= 0.5;
+    return text
+        .replace(/[\u3000-\u303f\uff00-\uffef!@#$%^&*()_+\-=\[\]{}|;':",.\/<>?`~\\]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 /**
- * Tokenize query using n-gram sliding window
- * Supports mixed-language content (Chinese, English, etc.)
- * CRITICAL: Always includes full query term for exact matching with higher weight
+ * 计算 n-gram 惩罚系数
+ * 长度越长，权重越低，避免长串主导匹配
+ * @param {number} n - N-gram size
+ * @returns {number} Penalty coefficient
+ */
+function getGramPenalty(n) {
+    return 1 / Math.pow(Math.E, n - 2);
+}
+
+/**
+ * 统一切片查询预处理
+ * 遵循《苦涩的教训》：通用方法，无语言知识，让计算解决问题
  * @param {string} query - Search query
- * @returns {object} { tokens: string[], fullQuery: string }
+ * @returns {object} { tokens: string[], fullQuery: string, tokenPenalties: object }
  */
 function tokenizeQuery(query) {
     if (!query || typeof query !== 'string') {
-        return { tokens: [], fullQuery: '' };
+        return { tokens: [], fullQuery: '', tokenPenalties: {} };
+    }
+
+    // Step 1: 清洗 - 去除符号和空格
+    const cleaned = cleanText(query);
+
+    if (!cleaned) {
+        return { tokens: [], fullQuery: '', tokenPenalties: {} };
     }
 
     const tokens = new Set();
+    const tokenPenalties = {};
+    const fullQuery = cleaned;
 
-    // CRITICAL: Always add full query term FIRST for exact matching
-    // This enables high-weight exact matching in applyFusion
-    const fullQuery = query.trim();
+    // Step 2: fullQuery 兜底（后续在评分层 boost）
     if (fullQuery.length >= 2) {
         tokens.add(fullQuery);
+        tokenPenalties[fullQuery] = 1.0;
     }
 
-    // Step 1: Split by whitespace for multiple query terms
-    const whitespaceTokens = query.split(/\s+/).filter(t => t.length > 0);
+    // Step 3: 按空白符分割
+    const whitespaceTokens = cleaned.split(/\s+/).filter(t => t.length > 0);
 
     whitespaceTokens.forEach(token => {
-        // Skip if this is the full query (already added)
         if (token === fullQuery) return;
 
-        // Step 2: Add token for matching
+        // 原始 token
         tokens.add(token);
+        tokenPenalties[token] = 1.0;
 
-        // Step 3: Generate n-grams based on text type
-        const isChinese = isChineseText(token);
-
-        if (isChinese) {
-            if (token.length >= 2) {
-                const bigrams = generateNGram(token, 2);
-                bigrams.forEach(t => tokens.add(t));
-            }
-        } else {
-            if (token.length >= 3) {
-                const trigrams = generateNGram(token, 3);
-                trigrams.forEach(t => tokens.add(t));
-            }
-        }
-
-        // Step 4: 4-gram and 5-gram for longer substring matching
-        if (token.length >= 4) {
-            const fourgrams = generateNGram(token, 4);
-            fourgrams.forEach(t => tokens.add(t));
-        }
-
-        if (token.length >= 5) {
-            const fivegrams = generateNGram(token, 5);
-            fivegrams.forEach(t => tokens.add(t));
+        // Step 4: 生成 2~(n-1) gram，最大为 n-1（fullQuery 已是 n-gram）
+        for (let n = 2; n <= token.length - 1; n++) {
+            generateNGram(token, n).forEach(gram => {
+                if (!tokens.has(gram)) {
+                    tokens.add(gram);
+                    tokenPenalties[gram] = getGramPenalty(n);
+                }
+            });
         }
     });
 
     return {
         tokens: Array.from(tokens).filter(t => t.length >= 2),
-        fullQuery
+        fullQuery,
+        tokenPenalties
     };
 }
 
@@ -190,18 +190,18 @@ export class HybridSearchService {
         // Collect all entity scores
         const entityScores = new Map();
 
-        termResults.forEach(({ term, tfidfResults, fuseResults, isFullQuery }) => {
+        termResults.forEach(({ term, tfidfResults, fuseResults, isFullQuery, penalty }) => {
             // Process TF-IDF results
             tfidfResults.forEach(result => {
                 if (result.score > 0) {
-                    this.addEntityScore(entityScores, result, term, 'tfidf', isFullQuery);
+                    this.addEntityScore(entityScores, result, term, 'tfidf', isFullQuery, penalty);
                 }
             });
 
             // Process Fuse results
             fuseResults.forEach(result => {
                 if (result.score > 0) {
-                    this.addEntityScore(entityScores, result, term, 'fuse', isFullQuery);
+                    this.addEntityScore(entityScores, result, term, 'fuse', isFullQuery, penalty);
                 }
             });
         });
@@ -212,8 +212,14 @@ export class HybridSearchService {
     /**
      * Add entity score to aggregation
      * CRITICAL: fullQuery + name match gets 5x weight boost
+     * @param {Map} entityScores - Entity scores map
+     * @param {object} result - Search result
+     * @param {string} term - Matched term
+     * @param {string} source - 'tfidf' or 'fuse'
+     * @param {boolean} isFullQuery - Whether term is full query
+     * @param {number} penalty - Gram penalty (1/e^(n-2))
      */
-    addEntityScore(entityScores, result, term, source, isFullQuery = false) {
+    addEntityScore(entityScores, result, term, source, isFullQuery = false, penalty = 1.0) {
         const { entityName, normalizedScore, matchedFields } = result;
 
         if (!entityScores.has(entityName)) {
@@ -247,8 +253,8 @@ export class HybridSearchService {
             entry.fullQueryMatch = true;
         }
 
-        // Apply weight multiplier for full query matches
-        const weightedScore = normalizedScore * weightMultiplier;
+        // Apply weight multiplier and gram penalty
+        const weightedScore = normalizedScore * weightMultiplier * penalty;
 
         // Add score based on source
         if (source === 'tfidf') {
@@ -274,7 +280,7 @@ export class HybridSearchService {
                 });
             }
             const fieldEntry = entry.matchedFields.get(field.field);
-            fieldEntry.score = Math.max(fieldEntry.score, field.score * weightMultiplier);
+            fieldEntry.score = Math.max(fieldEntry.score, field.score * weightMultiplier * penalty);
         });
     }
 
@@ -339,7 +345,7 @@ export class HybridSearchService {
         } = options;
 
         // Step 1: Tokenize query
-        const { tokens, fullQuery } = tokenizeQuery(query);
+        const { tokens, fullQuery, tokenPenalties } = tokenizeQuery(query);
 
         if (tokens.length === 0) {
             return {
@@ -364,6 +370,7 @@ export class HybridSearchService {
         const termResults = tokens.map(term => ({
             term,
             isFullQuery: term === fullQuery,  // Mark if this is the full query
+            penalty: tokenPenalties[term] || 1.0,  // Apply gram penalty
             ...this.searchTerm(term)
         }));
 
