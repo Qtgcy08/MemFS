@@ -256,7 +256,8 @@ export class SearchIntegrator {
             .filter(Boolean);
 
         // Combine: directly matched entities first, then related entities
-        const sortedEntities = [...sortedDirectEntities, ...sortedRelatedEntities];
+        // 限制总实体数为 limit，避免关联实体无限追加
+        const sortedEntities = [...sortedDirectEntities, ...sortedRelatedEntities].slice(0, limit);
 
         return {
             entities: sortedEntities,
