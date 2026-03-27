@@ -24,7 +24,7 @@ MEMORY_DIR=~/data GITAUTOCOMMIT=true node index.js
 node --check index.js
 node --check src/tfidf/hybridSearchService.js
 
-# Full test suite (23 tests)
+# Full test suite (22 tests)
 node test_mcp_full.mjs
 
 # Git Sync tests
@@ -37,7 +37,7 @@ node test_gitsync.mjs
 ### Test Files
 | File | Purpose |
 |------|---------|
-| `test_mcp_full.mjs` | 23 tests for all MCP tools + Git Sync |
+| `test_mcp_full.mjs` | 22 tests for all MCP tools + Git Sync |
 | `test_gitsync.mjs` | Git auto-commit scenarios |
 | `debug_search.html` | Web UI for debugging searchNode (open in browser) |
 | `test_cache/` | Isolated test directory with own git repo |
@@ -113,13 +113,15 @@ Query: "明日方舟终末地 新中国风"
     ↓ cleanText() (remove punctuation)
     ↓ tokenizeQuery()
     ├── fullQuery: "明日方舟终末地新中国风" (penalty=1.0, exact match boost)
-    ├── 2-gram: 明日, 日方, 方舟, 终末, 末地, 新中, 中国, 国风 (penalty=1.0)
+    ├── 2-gram: 明日, 日方, 方舟, 终末, 末地, 新中, 中国, 国风 (penalty=0.5)
     ├── 3-gram: 明日方, 日方舟, ... (penalty=0.368)
     ├── 4-gram: 明日方舟, ... (penalty=0.135)
     └── 5-gram+: increasingly penalized
 ```
 
-**Gram Penalty**: `1/e^(n-2)` - longer grams decay to avoid dominating matches
+**Gram Penalty**: 2-gram gets 50% penalty to reduce false positives; longer grams use `1/e^(n-2)` decay.
+
+> **Why 2-gram penalty?** Without it, short bigrams like "CA" could falsely match unrelated entities (e.g., "CA" in "Technical" matching "CA" in "CACG+"). The 50% penalty significantly reduces such false positive matches.
 
 ### Field Weights (Single Source of Truth)
 Defined in `hybridSearchService.js` as `DEFAULT_FIELD_WEIGHTS`:
@@ -212,7 +214,8 @@ Version bump: feat→minor, fix→patch, BREAKING CHANGE→major
 ## Recent Changes (2026-03)
 
 - **Gram Tokenization**: Unified 2~(n-1) gram system replacing language-specific rules
-- **Gram Penalty**: `1/e^(n-2)` decay for longer grams
+- **Gram Penalty**: 2-gram gets 50% penalty; longer grams use `1/e^(n-2)` decay
+- **2-gram False Positive Fix**: Apply 50% penalty to 2-gram tokens to reduce spurious matches (e.g., "CA" in "Technical" incorrectly matching "CA" in "CACG+")
 - **Field Weights**: Centralized in `DEFAULT_FIELD_WEIGHTS`
 - **DefinitionSource**: Added to index with weight 1.5
 - **Relation Boost**: Relation type matching query grams → 1.5x
