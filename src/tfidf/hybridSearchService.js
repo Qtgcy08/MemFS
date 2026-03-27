@@ -110,20 +110,33 @@ function tokenizeQuery(query) {
  * Hybrid Search Service
  * Weighted fusion of TF-IDF and fuzzy search with tokenization support
  */
+
+// Unified field weights - single source of truth
+const DEFAULT_FIELD_WEIGHTS = {
+    'name': 5.0,
+    'entityType': 2.5,
+    'definition': 2.5,
+    'definitionSource': 1.5,
+    'observation': 3.0
+};
+
 export class HybridSearchService {
     constructor(options = {}) {
+        const fieldWeights = options.fieldWeights || DEFAULT_FIELD_WEIGHTS;
+
         this.tfidfSearcher = new NaturalTfIdfSearcher({
-            fieldWeights: {
-                'name': 5.0,
-                'entityType': 2.5,
-                'definition': 2.5,
-                'definitionSource': 1.5,
-                'observation': 3.0
-            }
+            fieldWeights
         });
 
+        // Convert fieldWeights to Fuse.js keys format
+        const fuseKeys = Object.entries(fieldWeights).map(([name, weight]) => ({
+            name,
+            weight
+        }));
+
         this.fuseSearcher = new FuseSearcher({
-            threshold: options.fuzzyThreshold || 0.1  // Very strict: only allow minimal fuzziness
+            threshold: options.fuzzyThreshold || 0.1,  // Very strict
+            keys: fuseKeys
         });
 
         this.options = {
