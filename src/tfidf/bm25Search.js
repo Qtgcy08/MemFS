@@ -100,14 +100,8 @@ export class NaturalTfIdfSearcher {
         this.indexBuilt = false;
 
         this.options = {
-            // Field weights
-            fieldWeights: options.fieldWeights || {
-                'name': 3.0,         // Entity name - highest weight
-                'entityType': 2.5,   // Entity type
-                'definition': 2.5,   // Definition
-                'definitionSource': 1.5,  // Definition source
-                'observation': 2.0    // Observation
-            },
+            // Field weights - use passed value or fallback to empty (inherit from HybridSearchService)
+            fieldWeights: options.fieldWeights || {},
             ...options
         };
     }

@@ -15,14 +15,8 @@ export class FuseSearcher {
 
         this.options = {
             includeScore: true,
-            threshold: options.threshold || 0.4,  // Lower sensitivity for better results
-            keys: [
-                { name: 'name', weight: 3.0 },
-                { name: 'entityType', weight: 2.5 },
-                { name: 'definition', weight: 2.5 },
-                { name: 'definitionSource', weight: 1.5 },
-                { name: 'observations', weight: 2.0 }
-            ],
+            threshold: options.threshold || 0.4,
+            keys: options.keys || [],  // Inherit from HybridSearchService
             ...options
         };
     }
