@@ -163,12 +163,13 @@ export class SearchIntegrator {
         }
 
         // Get related relations
+        // Limit relations to 2x limit to keep output manageable
         const cleanRelations = graph.relations
             .filter(r =>
                 entityNames.includes(r.from) &&
                 entityNames.includes(r.to)
             )
-            .slice(0, 20)
+            .slice(0, limit * 2)
             .map(r => ({
                 from: r.from,
                 to: r.to,
