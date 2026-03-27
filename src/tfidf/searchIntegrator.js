@@ -157,7 +157,8 @@ export class SearchIntegrator {
                 .map(item => ({
                     id: item.id,
                     content: item.obs.content,
-                    createdAt: time ? (item.obs.createdAt || null) : null
+                    createdAt: time ? (item.obs.createdAt || null) : null,
+                    updatedAt: time ? (item.obs.updatedAt || null) : null
                 }));
         }
 
@@ -261,7 +262,6 @@ export class SearchIntegrator {
             entities: sortedEntities,
             relations: cleanRelations,
             observations: matchedObservations,
-            searchMode: 'hybrid',
             _meta: {
                 basicFetch: false,
                 totalCandidates: result.stats.totalCandidates + (result.stats.totalCandidates - directEntityNames.size),

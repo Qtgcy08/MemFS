@@ -629,7 +629,8 @@ export class KnowledgeGraphManager {
                 observations: rawObservations.map(o => ({
                     id: o.id,
                     content: o.content,
-                    createdAt: parseTimestampToStorage(o.createdAt)
+                    createdAt: parseTimestampToStorage(o.createdAt),
+                    updatedAt: parseTimestampToStorage(o.updatedAt)
                 })),
                 definitions: rawDefinitions.map(d => ({
                     entityName: d.entityName,
@@ -683,7 +684,8 @@ export class KnowledgeGraphManager {
                     type: "observation",
                     id: o.id,
                     content: o.content,
-                    createdAt: o.createdAt || null
+                    createdAt: o.createdAt || null,
+                    updatedAt: o.updatedAt || null
                 })),
                 ...graph.definitions.map(d => JSON.stringify({
                     type: "definition",
@@ -1194,6 +1196,7 @@ export class KnowledgeGraphManager {
         
         // Update the observation content - all linked entities will see this change
         observation.content = newContent;
+        observation.updatedAt = getCurrentTimestamp();  // Track when observation was updated
         
         // Find all entities that reference this observation
         const linkedEntities = graph.entities
@@ -1507,10 +1510,20 @@ const server = new McpServer({
 });
 // Console buffer for getConsole tool
 const consoleBuffer = [];
-// Override console.error to capture messages
+// Override console.error to capture messages with proper level detection
 const originalConsoleError = console.error;
 console.error = (...args) => {
-    consoleBuffer.push({ level: 'error', message: args.join(' '), timestamp: Date.now() });
+    const message = args.join(' ');
+    // Auto-detect level based on message content
+    let level = 'error';
+    if (/\[GitSync\]|\[MCP Server\]|\[Stats\]|MemFS v/.test(message)) {
+        level = 'info';
+    } else if (/\[Deprecation|Warning|warn/i.test(message)) {
+        level = 'warn';
+    } else if (/DETECTED:|COMPLETED:|error|fatal/i.test(message)) {
+        level = 'error';
+    }
+    consoleBuffer.push({ level, message, timestamp: Date.now() });
     originalConsoleError.apply(console, args);
 };
 // Register getConsole tool
@@ -1527,7 +1540,8 @@ server.registerTool("getConsole", {
         gitLog: z.string().optional()
     }
 }, async () => {
-    const messages = consoleBuffer.splice(0);
+    // Don't splice - just read all accumulated messages (splice would clear buffer)
+    const messages = [...consoleBuffer];
     
     // Get recent git log if git sync is enabled and initialized
     let gitLog = null;
@@ -1772,9 +1786,9 @@ server.registerTool("searchNode", {
         observations: z.array(z.object({
             id: z.number(),
             content: z.string(),
-            createdAt: z.string().nullable()
-        })),
-        searchMode: z.enum(['traditional', 'hybrid'])
+            createdAt: z.string().nullable(),
+            updatedAt: z.string().nullable()
+        }))
     }
 }, async ({ query, time, basicFetch, limit, maxObservationsPerEntity, totalMultiplier, bm25Weight, fuzzyWeight, minScore }) => {
     const result = await searchIntegrator.searchNode(query, {
@@ -1802,8 +1816,7 @@ server.registerTool("searchNode", {
     const limitedResult = {
         entities: totalOutput.filter(i => i._type === 'entity').map(({ _type, ...e }) => e),
         observations: totalOutput.filter(i => i._type === 'observation').map(({ _type, ...o }) => o),
-        relations: totalOutput.filter(i => i._type === 'relation').map(({ _type, ...r }) => r),
-        searchMode: cleanResult.searchMode
+        relations: totalOutput.filter(i => i._type === 'relation').map(({ _type, ...r }) => r)
     };
 
     return {
@@ -2057,9 +2070,20 @@ async function main() {
     searchIntegrator = new SearchIntegrator(knowledgeGraphManager);
     // Now inject searchIntegrator reference back to knowledgeGraphManager
     knowledgeGraphManager.searchIntegrator = searchIntegrator;
+    
+    // Load graph to display stats
+    const graph = await knowledgeGraphManager.loadGraph();
+    const entityCount = graph.entities.length;
+    const observationCount = graph.observations.length;
+    const relationCount = graph.relations.length;
+    const lastUpdated = graph._lastModified 
+        ? new Date(graph._lastModified).toISOString().replace('T', ' ').substring(0, 19) + ' UTC'
+        : 'N/A';
+    
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.error(`MemFS v${VERSION} running on stdio`);
+    console.error(`[MCP Server] MemFS v${VERSION} running on stdio`);
+    console.error(`[Stats] ${entityCount} entities | ${observationCount} observations | ${relationCount} relations | last updated ${lastUpdated}`);
 }
 main().catch((error) => {
     console.error("Fatal error in main():", error);
