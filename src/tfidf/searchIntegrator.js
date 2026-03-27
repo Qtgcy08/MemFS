@@ -181,22 +181,43 @@ export class SearchIntegrator {
 
         const directEntityNames = new Set(entityNames);  // Directly matched entities
 
+        // Clean query terms for relation matching
+        const cleanedQuery = query
+            .replace(/[\u3000-\u303f\uff00-\uffef!@#$%^&*()=\[\]{}|;':",.\/<>?`~\\]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const queryTerms = cleanedQuery.toLowerCase().split(/\s+/).filter(t => t.length >= 2);
+
+        // Base score for related entities
+        const BASE_RELATED_SCORE = 0.5;
+        // Boost score when relation type matches query
+        const RELATION_MATCH_BOOST = 1.5;
+
         // Collect ALL entities connected through relations (regardless of query match)
         const relationConnectedEntities = new Map();
 
         graph.relations.forEach(r => {
+            // Check if relation type matches any query term
+            const relationTypeLower = r.relationType.toLowerCase();
+            const relationMatchesQuery = queryTerms.some(term => 
+                relationTypeLower.includes(term)
+            );
+            const scoreBoost = relationMatchesQuery ? RELATION_MATCH_BOOST : BASE_RELATED_SCORE;
+
             // If 'from' is directly matched and 'to' is NOT directly matched, add 'to' as related
             if (directEntityNames.has(r.from) && !directEntityNames.has(r.to)) {
                 const existing = relationConnectedEntities.get(r.to) || {
                     entityName: r.to,
-                    relatedScore: 0.5,  // Base score for relation-connected entities
+                    relatedScore: 0,
+                    relationMatchCount: 0,
                     relatedThrough: []
                 };
 
-                existing.relatedScore = Math.max(existing.relatedScore, 0.5);
+                existing.relatedScore = Math.max(existing.relatedScore, scoreBoost);
                 existing.relatedThrough.push({
                     from: r.from,
-                    relationType: r.relationType
+                    relationType: r.relationType,
+                    matched: relationMatchesQuery
                 });
 
                 relationConnectedEntities.set(r.to, existing);
@@ -206,14 +227,16 @@ export class SearchIntegrator {
             if (directEntityNames.has(r.to) && !directEntityNames.has(r.from)) {
                 const existing = relationConnectedEntities.get(r.from) || {
                     entityName: r.from,
-                    relatedScore: 0.5,
+                    relatedScore: 0,
+                    relationMatchCount: 0,
                     relatedThrough: []
                 };
 
-                existing.relatedScore = Math.max(existing.relatedScore, 0.5);
+                existing.relatedScore = Math.max(existing.relatedScore, scoreBoost);
                 existing.relatedThrough.push({
                     to: r.to,
-                    relationType: r.relationType
+                    relationType: r.relationType,
+                    matched: relationMatchesQuery
                 });
 
                 relationConnectedEntities.set(r.from, existing);

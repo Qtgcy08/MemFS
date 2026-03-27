@@ -18,8 +18,9 @@ export class FuseSearcher {
             threshold: options.threshold || 0.4,  // Lower sensitivity for better results
             keys: [
                 { name: 'name', weight: 3.0 },
-                { name: 'entityType', weight: 2.0 },
-                { name: 'definition', weight: 2.0 },
+                { name: 'entityType', weight: 2.5 },
+                { name: 'definition', weight: 2.5 },
+                { name: 'definitionSource', weight: 1.5 },
                 { name: 'observations', weight: 2.0 }
             ],
             ...options
