@@ -35,7 +35,7 @@ function cleanText(text) {
         return '';
     }
     return text
-        .replace(/[\u3000-\u303f\uff00-\uffef!@#$%^&*()_+\-=\[\]{}|;':",.\/<>?`~\\]/g, '')
+        .replace(/[\u3000-\u303f\uff00-\uffef!@#$%^&*()=\[\]{}|;':",.\/<>?`~\\]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
 }
