@@ -1532,7 +1532,7 @@ const seenMessages = new Set();
 // Override console.error to capture messages
 const originalConsoleError = console.error;
 console.error = (...args) => {
-    const message = args.join(' ');
+    const message = args.join(' ').trim();
     if (!seenMessages.has(message)) {
         seenMessages.add(message);
         consoleBuffer.push(message);
