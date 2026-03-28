@@ -1738,7 +1738,7 @@ server.registerTool("deleteRelation", {
 // Register recycle_observation tool
 server.registerTool("recycleObservation", {
     title: "Recycle Observation",
-    description: "Permanently delete observations. Orphaned observations are deleted directly. Referenced observations are skipped unless force=true.",
+    description: "Permanently delete observations. Orphaned observations are deleted directly. Referenced observations are skipped unless force=true. Returns original content for potential undo.",
     inputSchema: {
         observationIds: z.array(z.number()).describe("Array of observation IDs to permanently delete"),
         force: z.boolean().optional().default(false).describe("Force delete even if observation is still referenced by entities")
