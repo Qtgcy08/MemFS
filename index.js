@@ -805,10 +805,10 @@ export class KnowledgeGraphManager {
         const created = newEntities.length;
         const skipped = skippedEntities.length;
         
-        let message = `Created ${created} entity(ies)`;
+        const createdNames = newEntities.map(e => e.name).join(', ');
+        let message = `Created ${created} entities: ${createdNames}`;
         if (skipped > 0) {
-            const skippedList = skippedEntities.map(name => `实体"${name}"已存在，使用updateNode更新该实体`).join('; ');
-            message += `, skipped ${skipped} duplicate(s): ${skippedList}`;
+            message += `; Skipped duplicates: ${skippedEntities.join(', ')}`;
         }
         
         return {
@@ -873,7 +873,8 @@ export class KnowledgeGraphManager {
             
             results.push({
                 entityName: o.entityName,
-                addedObservations: o.contents
+                addedObservations: o.contents,
+                addedObservationIds: entity.observationIds.slice(-o.contents.length)  // Last N IDs added
             });
         }
         
@@ -885,6 +886,11 @@ export class KnowledgeGraphManager {
     }
     async deleteEntity(entityNames) {
         const graph = await this.loadGraph();
+        
+        // Capture deleted entities and relations for potential undo
+        const deletedEntities = graph.entities.filter(e => entityNames.includes(e.name));
+        const deletedRelations = graph.relations.filter(r => entityNames.includes(r.from) || entityNames.includes(r.to));
+        
         graph.entities = graph.entities.filter(e => !entityNames.includes(e.name));
         graph.relations = graph.relations.filter(r => !entityNames.includes(r.from) && !entityNames.includes(r.to));
         
@@ -892,6 +898,11 @@ export class KnowledgeGraphManager {
         this._setOperation('deleteEntity', ...entityNames);
         
         await this.saveGraph(graph);
+        
+        return {
+            deletedEntities,
+            deletedRelations
+        };
     }
     async deleteObservation(observations) {
         const graph = await this.loadGraph();
@@ -941,7 +952,14 @@ export class KnowledgeGraphManager {
                 observation: observation,
                 observationId: obs.id,
                 removedFrom: removedFrom,
-                notFoundEntities: notFoundEntities
+                notFoundEntities: notFoundEntities,
+                // Full observation data for potential undo
+                observationData: {
+                    id: obs.id,
+                    content: obs.content,
+                    createdAt: obs.createdAt,
+                    updatedAt: obs.updatedAt
+                }
             });
             
             if (notFoundEntities.length > 0) {
@@ -1603,7 +1621,7 @@ server.registerTool("createRelation", {
 }, async ({ relations }) => {
     const result = await knowledgeGraphManager.createRelation(relations);
     return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        content: [{ type: "text", text: `Created ${result.length} relations` }],
         structuredContent: { relations: result }
     };
 });
@@ -1625,8 +1643,9 @@ server.registerTool("addObservation", {
     }
 }, async ({ observations }) => {
     const result = await knowledgeGraphManager.addObservation(observations);
+    const allNewIds = result.flatMap(r => r.addedObservationIds || []);
     return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        content: [{ type: "text", text: `Added observations to ${result.length} entities, new obs IDs: [${allNewIds.join(', ')}]` }],
         structuredContent: { results: result }
     };
 });
@@ -1642,10 +1661,16 @@ server.registerTool("deleteEntity", {
         message: z.string()
     }
 }, async ({ entityNames }) => {
-    await knowledgeGraphManager.deleteEntity(entityNames);
+    const result = await knowledgeGraphManager.deleteEntity(entityNames);
+    const names = result.deletedEntities.map(e => e.name).join(', ');
     return {
-        content: [{ type: "text", text: "Entities deleted successfully" }],
-        structuredContent: { success: true, message: "Entities deleted successfully" }
+        content: [{ type: "text", text: `Deleted entities: ${names}` }],
+        structuredContent: { 
+            success: true, 
+            message: `Deleted entities: ${names}`,
+            deletedEntities: result.deletedEntities,
+            deletedRelations: result.deletedRelations
+        }
     };
 });
 // Register delete_observations tool
@@ -1670,11 +1695,12 @@ server.registerTool("deleteObservation", {
     }
 }, async ({ observations }) => {
     const result = await knowledgeGraphManager.deleteObservation(observations);
+    const unlinkedIds = result.results.filter(r => r.observationId).map(r => r.observationId);
     const warningText = result.warnings.length > 0 
         ? `Warnings: ${result.warnings.join('; ')}` 
         : "";
     return {
-        content: [{ type: "text", text: `Observations unlinked. ${warningText}` }],
+        content: [{ type: "text", text: `Unlinked observations: [${unlinkedIds.join(', ')}]${warningText ? ' ' + warningText : ''}` }],
         structuredContent: result
     };
 });
@@ -1692,8 +1718,8 @@ server.registerTool("deleteRelation", {
 }, async ({ relations }) => {
     await knowledgeGraphManager.deleteRelation(relations);
     return {
-        content: [{ type: "text", text: "Relations deleted successfully" }],
-        structuredContent: { success: true, message: "Relations deleted successfully" }
+        content: [{ type: "text", text: `Deleted ${relations.length} relations` }],
+        structuredContent: { success: true, message: `Deleted ${relations.length} relations` }
     };
 });
 // Register recycle_observation tool
@@ -1896,8 +1922,9 @@ server.registerTool("updateNode", {
     }
 }, async ({ updates }) => {
     const results = await knowledgeGraphManager.updateNode(updates);
+    const updatedNames = results.map(r => r.entityName).join(', ');
     return {
-        content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
+        content: [{ type: "text", text: `Updated ${results.length} entities: ${updatedNames}` }],
         structuredContent: { results }
     };
 });
@@ -1992,8 +2019,9 @@ server.registerTool("updateObservation", {
         return base;
     });
     
+    const updatedIds = formattedResults.map(r => r.observationId).join(', ');
     return {
-        content: [{ type: "text", text: JSON.stringify(formattedResults, null, 2) }],
+        content: [{ type: "text", text: `Updated observations: [${updatedIds}]` }],
         structuredContent: { results: formattedResults }
     };
 });
