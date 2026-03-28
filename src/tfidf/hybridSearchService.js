@@ -92,12 +92,29 @@ function tokenizeQuery(query) {
         tokens.add(token);
         tokenPenalties[token] = 1.0;
 
-        // Step 4: 生成 2~(n-1) gram，最大为 n-1（fullQuery 已是 n-gram）
-        for (let n = 2; n <= token.length - 1; n++) {
-            generateNGram(token, n).forEach(gram => {
+        // Step 4: Incremental n-gram (avoid O(n²) explosion)
+        // n=3: 2-gram; n=4: 2-gram+3-gram; n>=5: 2-gram+3-gram+4-gram
+        if (token.length >= 3) {
+            generateNGram(token, 2).forEach(gram => {
                 if (!tokens.has(gram)) {
                     tokens.add(gram);
-                    tokenPenalties[gram] = getGramPenalty(n);
+                    tokenPenalties[gram] = getGramPenalty(2);
+                }
+            });
+        }
+        if (token.length >= 4) {
+            generateNGram(token, 3).forEach(gram => {
+                if (!tokens.has(gram)) {
+                    tokens.add(gram);
+                    tokenPenalties[gram] = getGramPenalty(3);
+                }
+            });
+        }
+        if (token.length >= 5) {
+            generateNGram(token, 4).forEach(gram => {
+                if (!tokens.has(gram)) {
+                    tokens.add(gram);
+                    tokenPenalties[gram] = getGramPenalty(4);
                 }
             });
         }
