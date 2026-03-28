@@ -1638,7 +1638,8 @@ server.registerTool("addObservation", {
     outputSchema: {
         results: z.array(z.object({
             entityName: z.string(),
-            addedObservations: z.array(z.string())
+            addedObservations: z.array(z.string()),
+            addedObservationIds: z.array(z.number()).optional()
         }))
     }
 }, async ({ observations }) => {
