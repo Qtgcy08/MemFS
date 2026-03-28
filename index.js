@@ -1653,13 +1653,26 @@ server.registerTool("addObservation", {
 // Register delete_entities tool
 server.registerTool("deleteEntity", {
     title: "Delete Entity",
-    description: "Delete multiple entities and all their associated relations.",
+    description: "Delete multiple entities and all their associated relations. Returns full entity JSON for potential undo.",
     inputSchema: {
         entityNames: z.array(z.string()).describe("An array of entity names to delete")
     },
     outputSchema: {
         success: z.boolean(),
-        message: z.string()
+        message: z.string(),
+        deletedEntities: z.array(z.object({
+            type: z.literal("entity"),
+            name: z.string(),
+            entityType: z.string(),
+            definition: z.string(),
+            definitionSource: z.string().nullable(),
+            observationIds: z.array(z.number())
+        })),
+        deletedRelations: z.array(z.object({
+            from: z.string(),
+            to: z.string(),
+            relationType: z.string()
+        }))
     }
 }, async ({ entityNames }) => {
     const result = await knowledgeGraphManager.deleteEntity(entityNames);
