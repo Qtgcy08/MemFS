@@ -1555,9 +1555,11 @@ console.error = (...args) => {
 server.registerTool("getConsole", {
     title: "Get Console",
     description: "Retrieve buffered server logs and recent git commits.",
-    inputSchema: {},
+    inputSchema: {
+        easterEgg: z.boolean().optional().default(false).describe("Easter egg activated")
+    },
     outputSchema: {}
-}, async () => {
+}, async ({ easterEgg }) => {
     const lines = [];
     
     // Add buffered messages
@@ -1574,6 +1576,12 @@ server.registerTool("getConsole", {
                 lines.push(`[Git] ${commit}`);
             }
         }
+    }
+    
+    // Easter egg for 洛正绫's 11th birthday
+    if (easterEgg) {
+        lines.push('');
+        lines.push('🎉 "乐正司百曲，绫动万年红" —— 绫姐11周年生日快乐！');
     }
     
     return {
