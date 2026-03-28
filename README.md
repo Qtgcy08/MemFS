@@ -319,8 +319,10 @@ await updateNode({
 
 ```jsonl
 {"type":"entity","name":"Weber","entityType":"person","definition":"German sociologist","definitionSource":"Wikipedia","observationIds":[1,2]}
+{"type":"entity","name":"Durkheim","entityType":"person","definition":"French sociologist","definitionSource":"Wikipedia","observationIds":[3]}
 {"type":"observation","id":1,"content":"Author of 'The Protestant Ethic'","createdAt":{"utc":"2026-02-08T13:53:07Z","timezone":"Asia/Shanghai"}}
-{"type":"observation","id":2,"content":"Contemporary with Durkheim and Marx","createdAt":{"utc":"2026-02-08T14:00:00Z","timezone":"Asia/Shanghai"}}
+{"type":"observation","id":2,"content":"Contemporary with Durkheim and Marx","createdAt":{"utc":"2026-02-08T14:00:00Z","timezone":"Asia/Shanghai"},"updatedAt":{"utc":"2026-02-09T10:30:00Z","timezone":"Asia/Shanghai"}}
+{"type":"observation","id":3,"content":"Author of 'The Division of Labor in Society'","createdAt":{"utc":"2026-02-08T15:00:00Z","timezone":"Asia/Shanghai"}}
 {"type":"relation","from":"Weber","to":"Durkheim","relationType":"contemporary"}
 ```
 

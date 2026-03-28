@@ -153,9 +153,6 @@ function getGramPenalty(n) {
 
 ### 7. 其他更新
 
-**调试工具**
-- `debug_search.html` Web UI (926 行)
-
 **文档更新**
 - `AGENTS.md`
 - `docs/searchNode_TechnicalReport.md`

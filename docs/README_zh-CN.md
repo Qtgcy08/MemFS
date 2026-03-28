@@ -1,4 +1,4 @@
-# 🧠 MemFS
+c:\Users\Qtgcy\.astrbot_launcher\instances\87376e80-3fb7-4eb9-8c89-c05dec434372\core\.venv# 🧠 MemFS
 
 **基于 MCP server-memory 深度重构的知识图谱管理系统**
 
@@ -188,7 +188,6 @@ flowchart TD
 | `readObservation` | 根据 ID 批量读取观察    | 核查具体观察内容  |
 | `listNode`        | 列出所有实体概览        | 浏览知识库结构   |
 | `listGraph`       | 读取整个知识图谱        | 批量导出、迁移   |
-| `howWork`         | 获取推荐工作流指导       | 了解系统使用方法  |
 
 ### 更新类
 
@@ -212,6 +211,7 @@ flowchart TD
 | 工具          | 功能                    | 示例              |
 | ----------- | --------------------- | ---------------- |
 | `getConsole` | 获取控制台消息和 Git 提交日志   | 查看自动提交历史     |
+| `howWork`         | 获取推荐工作流指导       | 了解系统使用方法  |
 
 ---
 
@@ -317,8 +317,10 @@ await updateNode({
 
 ```jsonl
 {"type":"entity","name":"韦伯","entityType":"人物","definition":"德国社会学家","definitionSource":"Wikipedia","observationIds":[1,2]}
+{"type":"entity","name":"涂尔干","entityType":"人物","definition":"法国社会学家","definitionSource":"Wikipedia","observationIds":[3]}
 {"type":"observation","id":1,"content":"《新教伦理与资本主义精神》作者","createdAt":{"utc":"2026-02-08T13:53:07Z","timezone":"Asia/Shanghai"}}
-{"type":"observation","id":2,"content":"与涂尔干、马克思并称社会学三大奠基人","createdAt":{"utc":"2026-02-08T14:00:00Z","timezone":"Asia/Shanghai"}}
+{"type":"observation","id":2,"content":"与涂尔干、马克思并称社会学三大奠基人","createdAt":{"utc":"2026-02-08T14:00:00Z","timezone":"Asia/Shanghai"},"updatedAt":{"utc":"2026-02-09T10:30:00Z","timezone":"Asia/Shanghai"}}
+{"type":"observation","id":3,"content":"《社会分工论》作者","createdAt":{"utc":"2026-02-08T15:00:00Z","timezone":"Asia/Shanghai"}}
 {"type":"relation","from":"韦伯","to":"涂尔干","relationType":"并称"}
 ```
 
@@ -414,7 +416,7 @@ node test_gitsync.mjs
 | **数据共享**      | 不支持    | 硬链接式共享        |
 | **更新机制**      | 直接覆盖   | Copy-on-Write |
 | **检索能力**      | 简单关键词  | BM25 + 模糊搜索 |
-| **孤立检测**      | 无      | 支持            |
+| **孤立检测**      | 理论上不支持孤儿观察      | 支持            |
 | **缓存机制**      | 无      | 30秒TTL        |
 | **Windows兼容** | 未知     | 优雅降级          |
 
@@ -447,4 +449,4 @@ Apache License 2.0
 
 ---
 
-**用文件系统的方式管理知识，让混乱变得有序。**
+> **用文件系统的方式管理知识，让混乱变得有序。**
