@@ -91,11 +91,11 @@ const gitSync = {
     
     // Log to console buffer (for getConsole tool)
     log(level, message) {
-        consoleBuffer.push({ level, message, timestamp: Date.now() });
+        consoleBuffer.push(`[Git] ${message}`);
         if (level === 'error') {
-            console.error(`[GitSync] ${message}`);
+            console.error(`[Git] ${message}`);
         } else {
-            console.error(`[GitSync] ${message}`);
+            console.error(`[Git] ${message}`);
         }
     },
     
@@ -186,7 +186,7 @@ const gitSync = {
     // Auto-commit memory file changes
     async autoCommit(memoryFilePath, operationContext = null) {
         try {
-            console.error('[GitSync] autoCommit called, enabled:', this.enabled, 'initialized:', this.initialized);
+            console.error('[Git] autoCommit called, enabled:', this.enabled, 'initialized:', this.initialized);
             if (!this.isEnabled()) return;
             if (!this.initialized) return;
             
@@ -197,13 +197,13 @@ const gitSync = {
             try {
                 await fs.access(memoryFilePath);
             } catch {
-                console.error('[GitSync] File does not exist yet');
+                console.error('[Git] File does not exist yet');
                 return; // File doesn't exist yet
             }
             
             // git add
             const addResult = this.execGit(['add', fileName], dir);
-            console.error('[GitSync] git add result:', addResult.success, addResult.output || addResult.error);
+            console.error('[Git] git add result:', addResult.success, addResult.output || addResult.error);
             if (!addResult.success) {
                 this.log('warn', 'Failed to git add: ' + addResult.error);
                 return;
@@ -211,17 +211,17 @@ const gitSync = {
             
             // Check if there are changes to commit
             const statusResult = this.execGit(['status', '--porcelain'], dir);
-            console.error('[GitSync] git status result:', statusResult.success, 'output:', statusResult.output);
+            console.error('[Git] git status result:', statusResult.success, 'output:', statusResult.output);
             if (!statusResult.success || !statusResult.output.trim()) {
-                console.error('[GitSync] No changes to commit');
+                console.error('[Git] No changes to commit');
                 return; // No changes to commit
             }
             
             // git commit with timestamp and operation context
-            // Format: chore: auto-sync (opType details) at UTC YYYY-MM-DDTHH:mm:ssZ
+            // Format: auto-sync: (opType details) at UTC YYYY-MM-DDTHH:mm:ss.SSSZ
             const timestamp = new Date().toISOString(); // ISO 8601 UTC format
             const opInfo = operationContext ? ` (${operationContext})` : '';
-            const commitMsg = `chore: auto-sync${opInfo} at UTC ${timestamp}`;
+            const commitMsg = `auto-sync:${opInfo} at UTC ${timestamp}`;
             
             const commitResult = this.execGit(['commit', '-m', commitMsg], dir);
             if (commitResult.success) {
@@ -230,7 +230,7 @@ const gitSync = {
                 this.log('warn', 'Failed to commit: ' + commitResult.error);
             }
         } catch (e) {
-            console.error('[GitSync] autoCommit exception:', e.message, e.stack);
+            console.error('[Git] autoCommit exception:', e.message, e.stack);
         }
     }
 };
@@ -456,6 +456,20 @@ function formatObservationTimestamp(data) {
     return { createdAt: null, updatedAt: null };
 }
 
+// Helper to get latest timestamp from observations
+function getLatestTimestamp(observations) {
+    let latest = null;
+    for (const obs of observations) {
+        const ts = obs.updatedAt || obs.createdAt;
+        if (ts && ts.utc) {
+            if (!latest || ts.utc > latest) {
+                latest = ts.utc;
+            }
+        }
+    }
+    return latest;
+}
+
 // The KnowledgeGraphManager class contains all operations to interact with the knowledge graph
 export class KnowledgeGraphManager {
     memoryFilePath;
@@ -474,7 +488,7 @@ export class KnowledgeGraphManager {
 
     // Set operation context for git commit message (auto-truncated)
     _setOperation(opType, ...details) {
-        const detail = details.length > 0 ? ' ' + details.join(', ') : '';
+        const detail = details.length > 0 ? ' ' + details.map(d => `"${d}"`).join(', ') : '';
         // Truncate to 50 chars max for commit message
         const full = `${opType}${detail}`;
         this.lastOperation = full.length > 50 ? full.substring(0, 47) + '...' : full;
@@ -601,6 +615,7 @@ export class KnowledgeGraphManager {
                 });
                 
                 // Return the migrated graph
+                const migratedObservationsList = rawObservations.concat(migratedObservations);
                 const migratedResult = {
                     entities: rawEntities.map(e => ({
                         name: e.name,
@@ -609,15 +624,22 @@ export class KnowledgeGraphManager {
                         definitionSource: e.definitionSource === undefined || e.definitionSource === null ? null : String(e.definitionSource),
                         observationIds: e.observationIds || []
                     })),
-                    observations: rawObservations.concat(migratedObservations),
+                    observations: migratedObservationsList,
                     definitions: rawDefinitions,
-                    relations: rawRelations
+                    relations: rawRelations,
+                    _lastModified: getLatestTimestamp(migratedObservationsList)
                 };
                 this._updateCache(migratedResult);
                 return migratedResult;
             }
             
             // New format: entities store observationIds (array of numbers)
+            const newFormatObservations = rawObservations.map(o => ({
+                id: o.id,
+                content: o.content,
+                createdAt: parseTimestampToStorage(o.createdAt),
+                updatedAt: parseTimestampToStorage(o.updatedAt)
+            }));
             const newFormatResult = {
                 entities: rawEntities.map(e => ({
                     name: e.name,
@@ -626,12 +648,7 @@ export class KnowledgeGraphManager {
                     definitionSource: e.definitionSource === undefined || e.definitionSource === null ? null : String(e.definitionSource),
                     observationIds: e.observationIds || []
                 })),
-                observations: rawObservations.map(o => ({
-                    id: o.id,
-                    content: o.content,
-                    createdAt: parseTimestampToStorage(o.createdAt),
-                    updatedAt: parseTimestampToStorage(o.updatedAt)
-                })),
+                observations: newFormatObservations,
                 definitions: rawDefinitions.map(d => ({
                     entityName: d.entityName,
                     content: d.content,
@@ -643,7 +660,8 @@ export class KnowledgeGraphManager {
                     from: r.from,
                     to: r.to,
                     relationType: r.relationType
-                }))
+                })),
+                _lastModified: getLatestTimestamp(newFormatObservations)
             };
             this._updateCache(newFormatResult);
             return newFormatResult;
@@ -711,15 +729,15 @@ export class KnowledgeGraphManager {
         // Clear cache since file was modified
         this._clearCache();
         
-        // Rebuild search index to ensure new data is searchable immediately
+        // Rebuild search index in background (non-blocking)
         if (this.searchIntegrator) {
-            await this.searchIntegrator.rebuildIndex();
+            this.searchIntegrator.rebuildIndex();
         }
         
         // Auto-commit to git if enabled
-        console.error('[GitSync] About to call autoCommit');
+        console.error('[Git] About to call autoCommit');
         await gitSync.autoCommit(this.memoryFilePath, this.lastOperation);
-        console.error('[GitSync] autoCommit returned');
+        console.error('[Git] autoCommit returned');
     }
     async createEntity(entities) {
         const graph = await this.loadGraph();
@@ -1508,60 +1526,53 @@ const server = new McpServer({
     name: "MemFS",
     version: VERSION,
 });
-// Console buffer for getConsole tool
+// Console buffer for getConsole tool (with deduplication)
 const consoleBuffer = [];
-// Override console.error to capture messages with proper level detection
+const seenMessages = new Set();
+// Override console.error to capture messages
 const originalConsoleError = console.error;
 console.error = (...args) => {
     const message = args.join(' ');
-    // Auto-detect level based on message content
-    let level = 'error';
-    if (/\[GitSync\]|\[MCP Server\]|\[Stats\]|MemFS v/.test(message)) {
-        level = 'info';
-    } else if (/\[Deprecation|Warning|warn/i.test(message)) {
-        level = 'warn';
-    } else if (/DETECTED:|COMPLETED:|error|fatal/i.test(message)) {
-        level = 'error';
+    if (!seenMessages.has(message)) {
+        seenMessages.add(message);
+        consoleBuffer.push(message);
     }
-    consoleBuffer.push({ level, message, timestamp: Date.now() });
     originalConsoleError.apply(console, args);
 };
 // Register getConsole tool
 server.registerTool("getConsole", {
     title: "Get Console",
-    description: "Retrieve buffered console messages and recent git commits from the server. Call this after other tools to see warnings, deprecation notices, and git sync status.",
+    description: "Retrieve buffered server logs and recent git commits.",
     inputSchema: {},
-    outputSchema: {
-        messages: z.array(z.object({
-            level: z.string(),
-            message: z.string(),
-            timestamp: z.number()
-        })),
-        gitLog: z.string().optional()
-    }
+    outputSchema: {}
 }, async () => {
-    // Don't splice - just read all accumulated messages (splice would clear buffer)
-    const messages = [...consoleBuffer];
+    const lines = [];
+    
+    // Add buffered messages
+    for (const msg of consoleBuffer) {
+        lines.push(msg);
+    }
     
     // Get recent git log if git sync is enabled and initialized
-    let gitLog = null;
     if (gitSync.isEnabled() && gitSync.initialized) {
         const logResult = await gitSync.execGit(['log', '--oneline', '-10'], gitSync.memoryDir);
         if (logResult.success) {
-            gitLog = logResult.output.trim();
+            const commits = logResult.output.trim().split('\n');
+            for (const commit of commits) {
+                lines.push(`[Git] ${commit}`);
+            }
         }
     }
     
-    const result = { messages, ...(gitLog && { gitLog }) };
     return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-        structuredContent: result
+        content: [{ type: "text", text: lines.join('\n') }],
+        structuredContent: {}
     };
 });
 // Register create_entities tool
 server.registerTool("createEntity", {
     title: "Create Entity",
-    description: "Multi create entities with definitions. Each requires name, type and definition. Skips duplicates and提醒使用updateNode更新.",
+    description: "Create multiple entities with names, types, and definitions. Skips duplicate entities - use updateNode to modify existing ones.",
     inputSchema: {
         entities: z.array(EntitySchema)
     },
@@ -1582,7 +1593,7 @@ server.registerTool("createEntity", {
 // Register create_relations tool
 server.registerTool("createRelation", {
     title: "Create Relation",
-    description: "Multi create relations between entities. Use active voice for relation types.",
+    description: "Create multiple relations between entities. Use active voice for relation types (e.g., 'includes', 'relates to', 'follows').",
     inputSchema: {
         relations: z.array(RelationSchema)
     },
@@ -1599,7 +1610,7 @@ server.registerTool("createRelation", {
 // Register add_observations tool
 server.registerTool("addObservation", {
     title: "Add Observation",
-    description: "Multi add observations to entities. Supports batch operations across entities.",
+    description: "Add observations to multiple entities. Supports batch operations across different entities.",
     inputSchema: {
         observations: z.array(z.object({
             entityName: z.string().describe("The name of the entity to add the observations to"),
@@ -1622,7 +1633,7 @@ server.registerTool("addObservation", {
 // Register delete_entities tool
 server.registerTool("deleteEntity", {
     title: "Delete Entity",
-    description: "Multi delete entities and their associated relations.",
+    description: "Delete multiple entities and all their associated relations.",
     inputSchema: {
         entityNames: z.array(z.string()).describe("An array of entity names to delete")
     },
@@ -1640,7 +1651,7 @@ server.registerTool("deleteEntity", {
 // Register delete_observations tool
 server.registerTool("deleteObservation", {
     title: "Delete Observation",
-    description: "Remove observation links from entities. Observation stays as orphan. Per-observation batch operation.",
+    description: "Remove observation links from entities without deleting the observation itself. Observation becomes orphaned and can be recycled.",
     inputSchema: {
         observations: z.array(z.object({
             observation: z.string().describe("The observation content to unlink"),
@@ -1670,7 +1681,7 @@ server.registerTool("deleteObservation", {
 // Register delete_relations tool
 server.registerTool("deleteRelation", {
     title: "Delete Relation",
-    description: "Multi delete relations from the knowledge graph.",
+    description: "Delete multiple relations from the knowledge graph.",
     inputSchema: {
         relations: z.array(RelationSchema).describe("An array of relations to delete")
     },
@@ -1688,7 +1699,7 @@ server.registerTool("deleteRelation", {
 // Register recycle_observation tool
 server.registerTool("recycleObservation", {
     title: "Recycle Observation",
-    description: "Batch permanently delete observations. If orphan, delete directly. If referenced, skip unless force=true (removes from entities and deletes).",
+    description: "Permanently delete observations. Orphaned observations are deleted directly. Referenced observations are skipped unless force=true.",
     inputSchema: {
         observationIds: z.array(z.number()).describe("Array of observation IDs to permanently delete"),
         force: z.boolean().optional().default(false).describe("Force delete even if observation is still referenced by entities")
@@ -1724,7 +1735,7 @@ server.registerTool("recycleObservation", {
 // Register read_graph tool
 server.registerTool("listGraph", {
     title: "List Graph",
-    description: "Read the entire knowledge graph. Use sparingly as it returns all data. Set time=true to include observation timestamps.",
+    description: "Read the entire knowledge graph with all entities, observations, and relations. Use sparingly as it returns all data. Set time=true to include timestamps.",
     inputSchema: {
         time: z.boolean().optional().default(false).describe("Include observation timestamps (createdAt)")
     },
@@ -1764,7 +1775,7 @@ server.registerTool("listGraph", {
 // Register search_nodes tool
 server.registerTool("searchNode", {
     title: "Search Node",
-    description: "Search entities using TF-IDF + Fuse.js hybrid search. Returns entities sorted by relevance score. Use basicFetch=true for traditional keyword matching.",
+    description: "Search entities using BM25 + Fuse.js hybrid search with relevance scoring. Returns sorted results with related entities and observations. Use basicFetch=true for traditional keyword matching.",
     inputSchema: {
         query: z.string().describe("The search query to match against entity names, types, definitions, and observation content"),
         time: z.boolean().optional().default(false).describe("Include observation timestamps (createdAt)"),
@@ -1774,7 +1785,7 @@ server.registerTool("searchNode", {
         totalMultiplier: z.number().optional().default(3).describe("Total output limit multiplier: limit × maxObservationsPerEntity × totalMultiplier (default: 3)"),
         bm25Weight: z.number().optional().default(0.7).describe("Weight for BM25 ranking (0-1, default: 0.7)"),
         fuzzyWeight: z.number().optional().default(0.3).describe("Weight for Fuse.js fuzzy matching (0-1, default: 0.3)"),
-        minScore: z.number().optional().default(0.01).describe("Minimum relevance score threshold (default: 0.01)")
+        minScore: z.number().optional().default(0.1).describe("Minimum relevance score threshold (default: 0.1)")
     },
     outputSchema: {
         entities: z.array(SearchNodeEntitySchema),
@@ -1821,7 +1832,7 @@ server.registerTool("searchNode", {
 // Register open_nodes tool
 server.registerTool("readNode", {
     title: "Read Node",
-    description: "Open entities with observations and relations. Includes inline to-entity details. Set time=true to include observation timestamps.",
+    description: "Get detailed entity information including observations and relations. Includes inline target entity details. Set time=true to include timestamps.",
     inputSchema: {
         names: z.array(z.string()).describe("An array of entity names to retrieve"),
         time: z.boolean().optional().default(false).describe("Include observation timestamps (createdAt)")
@@ -1858,7 +1869,7 @@ server.registerTool("readNode", {
 // Register updateNode tool
 server.registerTool("updateNode", {
     title: "Update Node",
-    description: "Multi update entities and observations. Observations use copy-on-write when shared.",
+    description: "Update multiple entities and their observations. Shared observations use copy-on-write to preserve other entity references.",
     inputSchema: {
         updates: z.array(z.object({
             entityName: z.string().describe("The name of the entity to update"),
@@ -1893,7 +1904,7 @@ server.registerTool("updateNode", {
 // Register orphan_observations tool
 server.registerTool("getOrphanObservation", {
     title: "Get Orphan Observation",
-    description: "Find observations not referenced by any entity. Safe to delete. Set time=true to include timestamps.",
+    description: "Find observations not referenced by any entity. These are safe to permanently delete with recycleObservation.",
     inputSchema: {
         time: z.boolean().optional().default(false).describe("Include observation timestamps (createdAt)")
     },
@@ -1915,7 +1926,7 @@ server.registerTool("getOrphanObservation", {
 // Register read_observations tool
 server.registerTool("readObservation", {
     title: "Read Observation",
-    description: "Read observations by IDs. Returns observation details including content and timestamp.",
+    description: "Get observation details by IDs. Returns content and timestamp.",
     inputSchema: {
         ids: z.array(z.number()).describe("Array of observation IDs to retrieve"),
         time: z.boolean().optional().default(false).describe("Include observation timestamps (createdAt)")
@@ -1945,7 +1956,7 @@ server.registerTool("readObservation", {
 // Register update_observations tool (batch)
 server.registerTool("updateObservation", {
     title: "Update Observation",
-    description: "Multi update observations by ID. Changes propagate to all linked entities (linked mechanism). Copy-on-write is only available via updateNode.",
+    description: "Batch update observations by ID. Changes propagate to all linked entities. For copy-on-write behavior, use updateNode instead.",
     inputSchema: {
         updates: z.array(z.object({
             observationId: z.number().describe("The ID of the observation to update"),
@@ -1989,7 +2000,7 @@ server.registerTool("updateObservation", {
 // Register read_nodes tool
 server.registerTool("listNode", {
     title: "List Node",
-    description: "List all entity names, types and definitions. Use readNode for detailed observations and relations.",
+    description: "List all entity names, types, and definitions. Use readNode for detailed observations and relations.",
     inputSchema: {},
     outputSchema: {
         nodes: z.array(z.object({
@@ -2009,7 +2020,7 @@ server.registerTool("listNode", {
 // Register howWork tool
 server.registerTool("howWork", {
     title: "How It Works",
-    description: "Get the recommended workflow for using memory knowledge graph.",
+    description: "Get the recommended workflow for using the knowledge graph system.",
     inputSchema: {},
     outputSchema: {
         workflow: z.string()
@@ -2065,7 +2076,7 @@ async function main() {
     // Now inject searchIntegrator reference back to knowledgeGraphManager
     knowledgeGraphManager.searchIntegrator = searchIntegrator;
     
-    // Load graph to display stats
+    // Load graph first for stats display
     const graph = await knowledgeGraphManager.loadGraph();
     const entityCount = graph.entities.length;
     const observationCount = graph.observations.length;
@@ -2078,6 +2089,14 @@ async function main() {
     await server.connect(transport);
     console.error(`[MCP Server] MemFS v${VERSION} running on stdio`);
     console.error(`[Stats] ${entityCount} entities | ${observationCount} observations | ${relationCount} relations | last updated ${lastUpdated}`);
+    
+    // Build index in background after server is connected and ready
+    setTimeout(() => {
+        const indexStart = Date.now();
+        searchIntegrator.ensureIndex().then(() => {
+            console.error(`[MCP Server] Search index ready in ${Date.now() - indexStart}ms`);
+        });
+    }, 100); // Small delay to ensure connection is fully established
 }
 main().catch((error) => {
     console.error("Fatal error in main():", error);
