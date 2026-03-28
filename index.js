@@ -904,24 +904,23 @@ export class KnowledgeGraphManager {
             deletedRelations
         };
     }
-    async deleteObservation(observations) {
+    async deleteObservation(observationIds, entityNames) {
         const graph = await this.loadGraph();
         const warnings = [];
         const results = [];
         
-        for (const item of observations) {
-            const observation = item.observation;
-            const entityNames = item.entityNames || [];
-            
-            const obs = graph.observations.find(o => o.content === observation);
+        const obsIds = Array.isArray(observationIds) ? observationIds : [observationIds];
+        const entNames = Array.isArray(entityNames) ? entityNames : (entityNames ? [entityNames] : []);
+        
+        for (const obsId of obsIds) {
+            const obs = graph.observations.find(o => o.id === obsId);
             
             if (!obs) {
-                warnings.push(`Observation "${observation}" not found`);
+                warnings.push(`Observation ID ${obsId} not found`);
                 results.push({
-                    observation: observation,
-                    observationId: null,
+                    observationId: obsId,
                     removedFrom: [],
-                    notFoundEntities: entityNames,
+                    notFoundEntities: entNames,
                     message: "Observation not found"
                 });
                 continue;
@@ -930,7 +929,7 @@ export class KnowledgeGraphManager {
             const removedFrom = [];
             const notFoundEntities = [];
             
-            for (const entityName of entityNames) {
+            for (const entityName of entNames) {
                 const entity = graph.entities.find(e => e.name === entityName);
                 
                 if (!entity) {
@@ -939,7 +938,7 @@ export class KnowledgeGraphManager {
                 }
                 
                 if (!entity.observationIds.includes(obs.id)) {
-                    warnings.push(`Observation "${observation}" not linked to entity "${entityName}"`);
+                    warnings.push(`Observation ID ${obsId} not linked to entity "${entityName}"`);
                     continue;
                 }
                 
@@ -949,8 +948,8 @@ export class KnowledgeGraphManager {
             }
             
             results.push({
-                observation: observation,
                 observationId: obs.id,
+                originalContent: obs.content,
                 removedFrom: removedFrom,
                 notFoundEntities: notFoundEntities,
                 // Full observation data for potential undo
@@ -963,17 +962,12 @@ export class KnowledgeGraphManager {
             });
             
             if (notFoundEntities.length > 0) {
-                warnings.push(`Entities not found for "${observation}": ${notFoundEntities.join(', ')}`);
+                warnings.push(`Entities not found for observation ID ${obsId}: ${notFoundEntities.join(', ')}`);
             }
         }
         
         // Set operation context for git commit
-        // Include entity names for better traceability
-        const opDetails = observations.map(o => {
-            const obsPreview = o.observation.length > 15 ? o.observation.substring(0, 12) + '...' : o.observation;
-            const entityList = (o.entityNames || []).join(',');
-            return entityList ? `${obsPreview} from ${entityList}` : obsPreview;
-        }).slice(0, 3);
+        const opDetails = obsIds.map(id => `obs#${id}`);
         this._setOperation('deleteObservation', ...opDetails);
         
         await this.saveGraph(graph);
@@ -1690,26 +1684,31 @@ server.registerTool("deleteEntity", {
 // Register delete_observations tool
 server.registerTool("deleteObservation", {
     title: "Delete Observation",
-    description: "Remove observation links from entities without deleting the observation itself. Observation becomes orphaned and can be recycled.",
+    description: "Remove observation links from entities by observation ID. Returns full observation content for potential undo.",
     inputSchema: {
-        observations: z.array(z.object({
-            observation: z.string().describe("The observation content to unlink"),
-            entityNames: z.array(z.string()).describe("Entity names to unlink from this observation")
-        }))
+        observationIds: z.array(z.number()).describe("Observation IDs to unlink"),
+        entityNames: z.array(z.string()).describe("Entity names to unlink from (omit to unlink from all)")
     },
     outputSchema: {
         success: z.boolean(),
         warnings: z.array(z.string()),
         results: z.array(z.object({
-            observation: z.string(),
             observationId: z.number(),
+            originalContent: z.string(),
             removedFrom: z.array(z.string()),
-            notFoundEntities: z.array(z.string())
+            notFoundEntities: z.array(z.string()),
+            observationData: z.object({
+                id: z.number(),
+                content: z.string(),
+                createdAt: z.any(),
+                updatedAt: z.any()
+            })
         }))
     }
-}, async ({ observations }) => {
-    const result = await knowledgeGraphManager.deleteObservation(observations);
+}, async ({ observationIds, entityNames }) => {
+    const result = await knowledgeGraphManager.deleteObservation(observationIds, entityNames);
     const unlinkedIds = result.results.filter(r => r.observationId).map(r => r.observationId);
+    const contents = result.results.filter(r => r.originalContent).map(r => `"${r.originalContent.substring(0, 20)}..."`);
     const warningText = result.warnings.length > 0 
         ? `Warnings: ${result.warnings.join('; ')}` 
         : "";
