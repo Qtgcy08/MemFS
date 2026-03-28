@@ -57,9 +57,19 @@ function tokenizeForIndex(text) {
     // Full text for exact matching
     tokens.add(cleaned);
 
-    // 2~(n-1) gram, maximum is n-1 (full text already covered)
-    for (let n = 2; n <= cleaned.length - 1; n++) {
-        generateNGram(cleaned, n).forEach(t => tokens.add(t));
+    // Incremental n-gram: avoid O(n²) explosion for short texts
+    // n<=2: 全词 only (already added)
+    // n=3: 全词 + 2-gram
+    // n=4: 全词 + 2-gram + 3-gram
+    // n>=5: 全词 + 2-gram + 3-gram + 4-gram
+    if (cleaned.length >= 3) {
+        generateNGram(cleaned, 2).forEach(t => tokens.add(t));
+    }
+    if (cleaned.length >= 4) {
+        generateNGram(cleaned, 3).forEach(t => tokens.add(t));
+    }
+    if (cleaned.length >= 5) {
+        generateNGram(cleaned, 4).forEach(t => tokens.add(t));
     }
 
     return Array.from(tokens);

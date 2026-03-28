@@ -168,7 +168,7 @@ const gitSync = {
             this.log('info', 'Initialized new git repo at ' + dir);
             
             // Configure user (required for commits)
-            await this.execGit(['config', 'user.email', 'memfs@local'], dir);
+            await this.execGit(['config', 'user.email', `memfs@${os.hostname()}`], dir);
             await this.execGit(['config', 'user.name', 'MemFS Auto-Sync'], dir);
             
             // Note: We don't create initial commit here because memory.jsonl

@@ -17,7 +17,7 @@ export class SearchIntegrator {
             bm25Weight: 0.7,    // Primary sorting
             fuzzyWeight: 0.3,     // Secondary support
             limit: 15,            // Default: 15 results
-            minScore: 0.01,
+            minScore: 0.1,
             fuzzyThreshold: 0.1  // Very strict to avoid false positives
         });
         this.traditionalSearcher = new TraditionalSearcher();
@@ -95,72 +95,6 @@ export class SearchIntegrator {
         const matchedEntities = entityNames
             .map(name => graph.entities.find(e => e.name === name))
             .filter(Boolean);
-
-        // Get matched observations
-        let matchedObservations = [];
-        if (includeObservations) {
-            const obsContentMap = new Map();
-            graph.observations.forEach(obs => {
-                obsContentMap.set(obs.id, obs.content);
-            });
-
-            // Tokenize query for observation scoring
-            const queryTerms = query.toLowerCase().split(/\s+/).filter(k => k.length >= 2);
-
-            // Create entity name to score map from hybrid search results
-            const entityScoreMap = new Map();
-            result.results.forEach(r => {
-                entityScoreMap.set(r.entityName, r.finalScore || 0);
-            });
-
-            // Score and collect observations by relevance
-            const scoredObservations = [];
-            matchedEntities.forEach(entity => {
-                const entityScore = entityScoreMap.get(entity.name) || 0;
-                const entityObs = (entity.observationIds || []).slice(0, maxObservationsPerEntity);  // 每个实体最多 maxObservationsPerEntity 个观察
-                entityObs.forEach(id => {
-                    const obs = graph.observations.find(o => o.id === id);
-                    const content = obsContentMap.get(id);
-                    if (obs && content) {
-                        // Calculate relevance: matching terms ratio * entity score (aggregate score)
-                        const matchedTerms = queryTerms.filter(term => 
-                            content.toLowerCase().includes(term)
-                        ).length;
-                        const termRatio = queryTerms.length > 0 ? matchedTerms / queryTerms.length : 0;
-                        
-                        // Aggregate score = term matching ratio × entity relevance
-                        const aggregateScore = termRatio * entityScore;
-                        
-                        scoredObservations.push({
-                            id,
-                            obs,
-                            aggregateScore,
-                            termRatio
-                        });
-                    }
-                });
-            });
-
-            // Sort by aggregate score (entity relevance × term matching)
-            scoredObservations.sort((a, b) => {
-                if (b.aggregateScore !== a.aggregateScore) return b.aggregateScore - a.aggregateScore;
-                // Secondary: more matching terms first
-                return b.termRatio - a.termRatio;
-            });
-
-            // Total observations limit = limit × maxObservationsPerEntity
-            const totalObsLimit = limit * maxObservationsPerEntity;
-
-            // Take top totalObsLimit observations
-            matchedObservations = scoredObservations
-                .slice(0, totalObsLimit)
-                .map(item => ({
-                    id: item.id,
-                    content: item.obs.content,
-                    createdAt: time ? (item.obs.createdAt || null) : null,
-                    updatedAt: time ? (item.obs.updatedAt || null) : null
-                }));
-        }
 
         // Get related relations
         // Limit relations to 2x limit to keep output manageable
@@ -280,35 +214,136 @@ export class SearchIntegrator {
         // 限制总实体数为 limit，避免关联实体无限追加
         const sortedEntities = [...sortedDirectEntities, ...sortedRelatedEntities].slice(0, limit);
 
+        // Get matched observations (from both direct and related entities)
+        let matchedObservations = [];
+        if (includeObservations) {
+            const obsContentMap = new Map();
+            graph.observations.forEach(obs => {
+                obsContentMap.set(obs.id, obs.content);
+            });
+
+            // Tokenize query for observation scoring
+            const queryTerms = query.toLowerCase().split(/\s+/).filter(k => k.length >= 2);
+
+            // Create entity name to score map from hybrid search results
+            const entityScoreMap = new Map();
+            result.results.forEach(r => {
+                entityScoreMap.set(r.entityName, r.finalScore || 0);
+            });
+
+            // Score and collect observations by relevance
+            const scoredObservations = [];
+            
+            // All entities to collect observations from (direct + related)
+            const allEntitiesForObs = [...matchedEntities];
+            
+            // Add related entities with their scores
+            sortedRelatedEntities.forEach(entity => {
+                if (!entityScoreMap.has(entity.name)) {
+                    entityScoreMap.set(entity.name, 0.5);
+                }
+                allEntitiesForObs.push(entity);
+            });
+            
+            allEntitiesForObs.forEach(entity => {
+                const entityScore = entityScoreMap.get(entity.name) || 0;
+                const entityObs = (entity.observationIds || []).slice(0, maxObservationsPerEntity);
+                entityObs.forEach(id => {
+                    const obs = graph.observations.find(o => o.id === id);
+                    const content = obsContentMap.get(id);
+                    if (obs && content) {
+                        // Calculate relevance: matching terms ratio * entity score (aggregate score)
+                        const matchedTerms = queryTerms.filter(term => 
+                            content.toLowerCase().includes(term)
+                        ).length;
+                        const termRatio = queryTerms.length > 0 ? matchedTerms / queryTerms.length : 0;
+                        
+                        // Aggregate score = term matching ratio × entity relevance
+                        const aggregateScore = termRatio * entityScore;
+                        
+                        scoredObservations.push({
+                            id,
+                            obs,
+                            aggregateScore,
+                            termRatio
+                        });
+                    }
+                });
+            });
+
+            // Sort by aggregate score (entity relevance × term matching)
+            scoredObservations.sort((a, b) => {
+                if (b.aggregateScore !== a.aggregateScore) return b.aggregateScore - a.aggregateScore;
+                // Secondary: more matching terms first
+                return b.termRatio - a.termRatio;
+            });
+
+            // Total observations limit = limit × maxObservationsPerEntity
+            const totalObsLimit = limit * maxObservationsPerEntity;
+
+            // Take top totalObsLimit observations
+            matchedObservations = scoredObservations
+                .slice(0, totalObsLimit)
+                .map(item => ({
+                    id: item.id,
+                    content: item.obs.content,
+                    createdAt: time ? (item.obs.createdAt || null) : null,
+                    updatedAt: time ? (item.obs.updatedAt || null) : null
+                }));
+        }
+
         return {
             entities: sortedEntities,
             relations: cleanRelations,
             observations: matchedObservations,
             _meta: {
-                basicFetch: false,
+                query,
+                fullQuery: result.fullQuery,
+                terms: result.terms,
                 totalCandidates: result.stats.totalCandidates + (result.stats.totalCandidates - directEntityNames.size),
                 returnedCount: result.stats.returnedCount,
                 relatedEntitiesCount: sortedRelatedEntities.length,
                 bm25Weight,
                 fuzzyWeight,
+                minScore: result.stats.minScore,
+                limit,
+                indexStatus: this.isIndexed ? 'ready' : 'rebuilding',
+                rebuildScheduled: this._rebuildScheduled || false,
                 timestamp: new Date().toISOString(),
-                // debug信息内部分词和统计，不对外暴露
-                debug: {
-                    terms: result.terms,
-                    tokenizationDetails: result.debug?.tokenization || []
-                }
+                tokenization: result.debug?.tokenization || []
             }
         };
     }
 
     /**
-     * Rebuild index
+     * Rebuild index - schedules background rebuild, doesn't block
      */
-    async rebuildIndex() {
+    rebuildIndex() {
+        // Mark as needing rebuild
         this.isIndexed = false;
-        // Also reset HybridSearchService's index state
         this.hybridService.isIndexed = false;
-        await this.ensureIndex();
+        
+        // Don't await - rebuild in background
+        this._scheduleRebuild();
+    }
+
+    /**
+     * Schedule background rebuild with debounce
+     */
+    _scheduleRebuild() {
+        if (this._rebuildScheduled) return;
+        this._rebuildScheduled = true;
+        
+        setTimeout(async () => {
+            try {
+                await this.ensureIndex();
+                console.error('[MCP Server] Search index rebuilt');
+            } catch (e) {
+                console.error('[MCP Server] Index rebuild failed:', e.message);
+            } finally {
+                this._rebuildScheduled = false;
+            }
+        }, 100);
     }
 
     /**

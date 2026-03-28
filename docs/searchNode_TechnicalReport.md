@@ -4,19 +4,31 @@
 
 ### 1.1 项目背景
 
-MemFS 是一个基于 MCP Memory Server 深度重构的知识图谱管理系统，其核心设计理念是将现代文件系统的概念迁移到知识图谱管理中。`searchNode` 是其核心搜索工具，采用 BM25 + Fuse.js 混合搜索方案。
+MemFS 是一个基于 MCP Memory Server 深度重构的知识图谱管理系统，其核心设计理念是将现代文件系统的概念迁移到知识图谱管理中。在文件系统中，搜索和检索是核心功能之一；在知识图谱中，高效、准确的实体检索同样至关重要。本报告详细阐述 MemFS 中 `searchNode` 工具的技术实现方案，包括其架构设计、算法选择、参数配置以及优化策略。
+
+>「 本搜索模块的设计遵循 MemFS 的整体哲学。关于整体设计思想，请参阅《MemFS 整体技术报告》。」
+
+MemFS 引入了基于 BM25（Best Matching 25）和模糊搜索的混合检索方案。
 
 ### 1.2 设计目标
 
-**检索准确性**：BM25 算法考虑词频和逆文档频率，有效区分常见词汇和专业术语。
+本技术方案的设计目标包含以下几个方面：
 
-**模糊匹配能力**：Fuse.js 提供拼写容错，容忍用户输入的拼写错误和格式差异。
+**检索准确性**：通过 BM25 算法计算查询词与文档的相关性，能够识别出真正重要的词汇，而不是简单地将包含查询词的文档全部返回。BM25 考虑了词频（term frequency）和逆文档频率（inverse document frequency）两个维度，能够有效区分常见词汇和专业术语。
 
-**分词质量**：采用统一的 n-gram 分词方案，不依赖语言检测或词库。
+**模糊匹配能力**：引入 Fuse.js 提供模糊搜索功能，能够容忍用户输入的拼写错误、拼写变体以及格式差异。这对于知识图谱应用尤为重要，因为用户可能并不确切记得实体名称的正确拼写，或者在输入过程中容易产生笔误。
+
+**分词质量**：采用基于 n-gram 的智能分词方案，能够正确处理中英文混合内容，避免误匹配，且不依赖词库。
+
+**零依赖设计**：放弃对外部库的依赖，改用纯 JavaScript 实现的 n-gram + BM25，减少外部依赖。
+
+**结果排序优化**：将 BM25 和模糊搜索的结果进行加权融合，同时考虑命中的字段类型（如实体名称的权重高于观察内容的权重），最终按照综合相关性得分对结果进行排序。
+
+**向后兼容**：保留传统的关键词匹配模式作为备选方案，用户可以通过 `basicFetch=true` 参数显式选择使用传统搜索，这在某些特殊场景下（如已知确切实体名称时的快速检索）可能更为高效。
+
+**可控返回量**：设置合理的默认返回数量上限（15个），避免一次返回过多结果导致LLM上下文溢出，同时确保用户能够获取足够数量的相关实体。
 
 **《苦涩的教训》原则**：不使用语言学知识，让通用计算方法（n-gram + BM25）解决问题。
-
-**结果排序优化**：BM25 和模糊搜索加权融合（0.7 / 0.3），结合字段权重和 fullQuery boost。
 
 ### 1.3 技术选型
 
@@ -79,7 +91,7 @@ function cleanText(text) {
 
 ### 3.2 统一切词机制
 
-遵循《苦涩的教训》：不区分语言，统一使用 2~(n-1) gram。
+遵循《苦涩的教训》：不区分语言，使用增量 n-gram 方案避免 O(n²) 爆炸。
 
 ```javascript
 function tokenizeQuery(query) {
@@ -97,10 +109,11 @@ function tokenizeQuery(query) {
         if (token === fullQuery) return;
         tokens.add(token);
 
-        // 生成 2~(n-1) gram
-        for (let n = 2; n <= token.length - 1; n++) {
-            generateNGram(token, n).forEach(gram => tokens.add(gram));
-        }
+        // 增量 n-gram：避免短文本产生海量 tokens
+        // n=3: 2-gram | n=4: 2-gram+3-gram | n≥5: 2-gram+3-gram+4-gram
+        if (token.length >= 3) generateNGram(token, 2).forEach(g => tokens.add(g));
+        if (token.length >= 4) generateNGram(token, 3).forEach(g => tokens.add(g));
+        if (token.length >= 5) generateNGram(token, 4).forEach(g => tokens.add(g));
     });
 
     return { tokens, fullQuery, tokenPenalties };
@@ -109,17 +122,20 @@ function tokenizeQuery(query) {
 
 ### 3.3 Gram 惩罚机制
 
-长 gram 获得惩罚，避免长串主导匹配：
+**2-gram 特殊惩罚**：短 bigram 如 "CA" 可能产生假阳性（如 "Technical" 中的 "CA" 匹配 "CACG+" 中的 "CA"），因此 2-gram 单独设置 ×0.5 惩罚。
+
+长 gram 使用指数衰减：
 
 ```javascript
 function getGramPenalty(n) {
+    if (n === 2) return 0.5;  // ×0.5 惩罚，减少假阳性
     return 1 / Math.pow(Math.E, n - 2);
 }
 ```
 
 | n | penalty | 含义 |
 |---|---------|------|
-| 2 | 1.0 | 基础语义单元，无折扣 |
+| 2 | **0.5** | 假阳性惩罚 |
 | 3 | 0.368 | 约 1/3 |
 | 4 | 0.135 | 约 1/7 |
 | 5 | 0.050 | 约 1/20 |
@@ -148,7 +164,7 @@ const DEFAULT_FIELD_WEIGHTS = {
     'entityType': 2.5,
     'definition': 2.5,
     'definitionSource': 1.5,
-    'observation': 3.0
+    'observation': 1.0
 };
 ```
 
@@ -243,12 +259,13 @@ const invertedScore = 1 - r.score;  // 取反
 
 ### 6.1 Boost 机制
 
-| 匹配类型 | Boost 倍数 | 来源 |
+| 匹配类型 | Boost 倍数 | 说明 |
 |---------|-----------|------|
-| **fullQuery + name** | 5× base + 2× fusion = **10×** | addEntityScore + applyFusion |
-| **fullQuery + 其他字段** | 2× base + 1.5× fusion = **3×** | addEntityScore + applyFusion |
+| **fullQuery + name** | **10×** | 5× base + 2× fusion → 最高优先级 |
+| **fullQuery + 其他字段** | **3×** | 2× base + 1.5× fusion |
 | **普通匹配** | 1× | 仅靠 gram penalty |
 | **多 term 命中** | × log₂(1+k) | applyFusion termBoost |
+| **Relation 类型匹配** | **1.5×** | 关系类型包含 query gram tokens |
 
 ### 6.2 Gram 惩罚应用
 
@@ -370,24 +387,32 @@ if (keywords.some(kw => entity.name.toLowerCase().includes(kw.toLowerCase()))) {
 ### 10.1 Gram Tokenization
 
 - 移除语言检测 (`isChineseText`)
-- 统一 2~(n-1) gram 方案
+- **增量 n-gram 方案**：n≤2 全词、n=3 全词+2-gram、n=4 全词+2-gram+3-gram、n≥5 全词+2-gram+3-gram+4-gram
 - 添加 `cleanText()` 去除符号
+- **性能优化**：避免 O(n²) token 爆炸，索引内存从 ~1GB 降至 ~20MB（448K 文件）
 
 ### 10.2 Gram Penalty
 
 - 新增 `getGramPenalty(n)` = 1/e^(n-2)
+- **2-gram 特殊处理**：×0.5 惩罚，减少假阳性（如 "CA" 匹配 "Technical" 中的 "CA" 与 "CACG+" 中的 "CA"）
 - 长 gram 自动降权
 
 ### 10.3 Field Weights
 
-- `entityType`: 4.0 → 2.5
-- `definition`: 4.0 → 2.5
-- `definitionSource`: 新增，权重 1.5
+| 字段 | 旧权重 | 新权重 |
+|------|--------|--------|
+| name | 5.0 | 5.0 |
+| entityType | 4.0 | 2.5 |
+| definition | 4.0 | 2.5 |
+| definitionSource | - | 1.5 |
+| observation | 3.0 | **1.0** |
+
 - 集中定义在 `DEFAULT_FIELD_WEIGHTS`
 
 ### 10.4 Relation Boost
 
-- 关系类型匹配查询 gram tokens → 1.5x boost
+- 关系类型匹配查询 gram tokens → **1.5× boost**
+- 使用 gram tokens 而非 fullQuery 进行匹配
 - 关联实体加权参与排序
 
 ### 10.5 Limit 修复
@@ -405,10 +430,10 @@ if (keywords.some(kw => entity.name.toLowerCase().includes(kw.toLowerCase()))) {
 
 | 指标 | 表现 |
 |------|------|
-| 首次查询延迟 | <100ms（懒加载索引） |
-| 单次查询延迟 | <10ms |
-| 内存占用 | <1MB |
-| 离线支持 | 完全支持 |
+| 索引建立（448K 文件） | ~90ms / ~20MB 内存 |
+| 单次查询延迟 | <20ms |
+| 内存占用 | <50MB（索引优化后） |
+| 离线使用 | 支持 |
 
 ## 十二、总结
 

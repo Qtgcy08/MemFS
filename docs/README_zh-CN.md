@@ -79,6 +79,40 @@ GITAUTOCOMMIT=true node index.js
 
 ---
 
+## 📰 2.4.12 更新公告
+
+### Git 自动提交
+
+新增 `GITAUTOCOMMIT=true` 环境变量，启用后每次操作自动提交到 Git：
+
+```
+auto-sync: (createEntity "韦伯") at UTC 2026-03-28T12:34:56.789Z
+```
+
+### searchNode 重构
+
+- 返回结构简化为 `{ entities, observations, relations }`
+- 移除 `searchMode` 字段
+- `observations` 增加 `updatedAt` 字段
+- 关联实体总数受 `limit` 限制
+- 统一分词系统：移除语言检测，改为 2~(n-1) gram 统一切分
+- 2-gram 惩罚系数 **×0.5**：短词匹配不再过度命中
+- 字段权重统一管理
+- `definitionSource` 加入搜索索引
+- 关系类型匹配 boost
+
+### 操作返回重构
+
+- 写操作返回消息精简，减少 LLM token 消耗
+- 删除操作返回完整数据，便于撤销
+- `deleteObservation` 改为 ID 输入
+
+### 辅助工具
+
+- 新增 `getConsole` 工具获取缓冲日志
+
+---
+
 ## 📖 核心概念
 
 | 概念                   | 说明        | 类比    |
@@ -212,12 +246,13 @@ await searchNode("社会学", {
 
 ### 字段权重
 
-| 字段          | 权重  | 说明        |
-| ----------- | --- | --------- |
-| name        | 5.0 | 最高 - 实体名称 |
-| entityType  | 4.0 | 实体类型      |
-| definition  | 4.0 | 定义描述      |
-| observation | 3.0 | 观察内容      |
+| 字段 | 权重 | 说明 |
+|------|------|------|
+| name | 5.0 | 最高 - 实体名称 |
+| entityType | 2.5 | 实体类型 |
+| definition | 2.5 | 定义描述 |
+| definitionSource | 1.5 | 定义来源 |
+| observation | 1.0 | 观察内容 |
 
 ---
 
@@ -324,38 +359,49 @@ GITAUTOCOMMIT=true node index.js
 ### 提交格式
 
 ```
-chore: auto-sync (操作类型 操作详情) at UTC YYYY-MM-DDTHH:mm:ss.SSSZ
+auto-sync: (操作类型 "详情") at UTC YYYY-MM-DDTHH:mm:ss.SSSZ
 ```
 
 示例：
 ```
-chore: auto-sync (createEntity 韦伯) at UTC 2026-03-22T09:15:30.123Z
-chore: auto-sync (updateNode 涂尔干) at UTC 2026-03-22T09:16:45.456Z
-chore: auto-sync (deleteRelation 韦伯→涂尔干) at UTC 2026-03-22T09:17:00.789Z
+auto-sync: (createEntity "韦伯") at UTC 2026-03-22T09:15:30.123Z
+auto-sync: (updateNode "涂尔干") at UTC 2026-03-22T09:16:45.456Z
+auto-sync: (deleteRelation "韦伯"→"涂尔干") at UTC 2026-03-22T09:17:00.789Z
 ```
 
 ### 查看提交历史
 
-使用 `getConsole` 工具获取 Git 日志：
+使用 `getConsole` 工具获取日志：
 
 ```javascript
 await getConsole()
-// 返回: { messages: [...], gitLog: "commit message\ncommit message\n..." }
+// 返回文本内容，包含缓冲日志和以"[Git]"前缀的Git提交记录
 ```
+
+---
+
+## 📦 旧版本
+
+v1.3.0 代码位于 `legacy` 分支：
+
+```bash
+git clone https://github.com/Qtgcy08/MemFS.git
+cd MemFS
+git checkout legacy
+```
+
+如果您正在使用 `MEMORY_FILE_PATH`，请在升级前迁移到 `MEMORY_DIR`。
 
 ---
 
 ## 🧪 测试
 
 ```bash
-# 完整测试套件（45个测试）
-node test_full.mjs
+# 完整测试套件（22个测试）
+node test_mcp_full.mjs
 
-# 混合搜索测试（38个测试）
-node test_hybrid_search.mjs
-
-# 观察搜索测试
-node test_observation_search.mjs
+# Git Sync 测试
+node test_gitsync.mjs
 ```
 
 ---

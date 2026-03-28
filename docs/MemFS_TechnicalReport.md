@@ -39,7 +39,7 @@ flowchart TD
 
 #### 2.1.2 全部操作通过 MCP 暴露
 
-MemFS 的每一个功能都是一个 MCP 工具，共计 16 个工具：
+MemFS 的每一个功能都是一个 MCP 工具，共计 17 个工具：
 | 类别     | 工具名称                   | 功能描述              | 典型使用场景      |
 | ------ | ---------------------- | ----------------- | ----------- |
 | **创建** | `createEntity`         | 批量创建实体（概念、人物、文献）  | 添加新知识条目     |
@@ -50,7 +50,6 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 16 个工具：
 |        | `readObservation`      | 根据 ID 批量读取观察内容      | 核查具体观察内容    |
 |        | `listNode`             | 列出所有实体概览          | 浏览知识库结构     |
 |        | `listGraph`            | 读取整个知识图谱          | 批量导出、数据迁移   |
-|        | `howWork`              | 获取推荐工作流指导         | 了解系统使用方法    |
 | **更新** | `updateNode`           | 更新实体及其观察内容        | 修改定义、更新笔记   |
 |        | `updateObservation`    | 批量更新观察内容          | 批量修正观察信息    |
 | **删除** | `deleteEntity`         | 删除实体及关联关系         | 移除过时或错误条目   |
@@ -58,6 +57,8 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 16 个工具：
 |        | `deleteObservation`    | 解除观察链接（保留观察）      | 移除实体引用      |
 |        | `getOrphanObservation` | 查找孤儿观察            | 发现无效数据      |
 |        | `recycleObservation`   | 回收并永久删除观察         | 清理无用数据      |
+| **辅助** | `howWork`              | 获取推荐工作流指导         | 了解系统使用方法    |
+|        | `getConsole`           | 获取缓冲的控制台日志和 Git 提交历史 | 查看自动提交记录、日志去重 |
 **设计理念**：每个工具做一件事，职责清晰。LLM 可以根据对话上下文选择合适的工具，就像人类研究者会查阅笔记、建立联系或整理资料一样。
 
 ### 2.2 跨平台与轻量化
@@ -486,11 +487,65 @@ if (needsMigration) {
 
 - **不支持实时同步**：依赖文件系统作为"真相源"
   
-  ### 5.3 未来可能的扩展方向
-  
+  ### 5.3 2.4.12 版本更新
+
+  2.4.12 是 MemFS 的重大更新版本，包含以下核心改动：
+
+  #### Git Auto-Commit
+
+  - 环境变量：`GITAUTOCOMMIT=true`
+  - 每次 `saveGraph()` 自动提交到 Git
+  - 提交格式：`auto-sync: (operation_type "details") at UTC YYYY-MM-DDTHH:mm:ss.SSSZ`
+  - 实体名称用双引号包裹，如 `"Weber"`
+
+  #### searchNode 重构
+
+  **统一分词系统**
+  - 移除 `isChineseText()` 语言检测
+  - 新增 `cleanText()` 统一清洗
+  - 统一 2~(n-1) gram 体系
+
+  **2-gram 惩罚**
+  ```javascript
+  function getGramPenalty(n) {
+      if (n === 2) return 0.5;  // ×0.5 惩罚，减少假阳性
+      return 1 / Math.pow(Math.E, n - 2);
+  }
+  ```
+
+  **字段权重调整（DEFAULT_FIELD_WEIGHTS）**
+  | 字段 | 权重 |
+  |------|------|
+  | name | 5.0 |
+  | entityType | 2.5 |
+  | definition | 2.5 |
+  | definitionSource | 1.5 |
+  | observation | 1.0 |
+
+  **其他优化**
+  - `definitionSource` 加入搜索索引
+  - 关系类型匹配 boost (1.5x)
+  - `searchMode` 移除
+  - `updatedAt` 字段加入 observations
+  - 关联实体总数受 `limit` 限制
+
+  #### 操作返回重构
+
+  - 写操作返回消息简化，减少 LLM token 消耗
+  - `deleteObservation` 改为 ID 输入，返回包含 `originalContent` 和 `observationData`
+  - `deleteEntity` 返回完整 `deletedEntities` 和 `deletedRelations` 便于撤销
+
+  #### Console 去重
+
+  - `getConsole` 新增工具
+  - 消息去重（Set）
+  - trim 后去重
+
+  ### 5.4 未来可能的扩展方向
+
   | 方向     | 说明                              |
   | ------ | ------------------------------- |
-  | Git 联动 | 版本控制、云同步、分布式协作                  |
+  | 云同步    | 分布式协作、跨设备同步                    |
   | 可视化    | 生成知识图谱 DOT/Graphviz/Markmind  文件 |
   | 导入导出   | 支持常见格式（Markdown、CSV、BibTeX）     |
 

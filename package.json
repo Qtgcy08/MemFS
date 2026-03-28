@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node index.js",
-    "test": "node test_full.mjs"
+    "test": "node test_mcp_full.mjs"
   },
   "keywords": [
     "knowledge-graph",
