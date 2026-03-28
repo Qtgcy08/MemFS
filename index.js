@@ -1505,7 +1505,7 @@ const EntitySchema = z.object({
     name: z.string().describe("The name of the entity"),
     entityType: z.string().describe("The type of the entity"),
     definition: z.string().describe("The definition of the entity"),
-    definitionSource: z.string().optional().describe("Source or reference for the definition"),
+    definitionSource: z.string().optional().describe("Source of the definition - prefer URL, filename, or book title"),
     observations: z.array(z.string()).optional().default([]).describe("Observation contents")
 });
 const EntityOutputSchema = z.object({
