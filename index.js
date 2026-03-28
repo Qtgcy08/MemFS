@@ -1655,11 +1655,10 @@ server.registerTool("deleteEntity", {
         success: z.boolean(),
         message: z.string(),
         deletedEntities: z.array(z.object({
-            type: z.literal("entity"),
             name: z.string(),
             entityType: z.string(),
             definition: z.string(),
-            definitionSource: z.string().nullable(),
+            definitionSource: z.string().nullable().optional(),
             observationIds: z.array(z.number())
         })),
         deletedRelations: z.array(z.object({
