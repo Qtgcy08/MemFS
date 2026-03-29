@@ -2100,29 +2100,40 @@ server.registerTool("howWork", {
         structuredContent: { workflow }
     };
 });
-async function main() {
-    // Initialize memory file path with backward compatibility
-    MEMORY_FILE_PATH = await ensureMemoryFilePath();
+/**
+ * Create and initialize managers (for programmatic use / visualizer)
+ * Returns { knowledgeGraphManager, searchIntegrator }
+ */
+export async function createManagers(options = {}) {
+    const memoryPath = options.memoryPath || await ensureMemoryFilePath();
+    
     // Ensure the memory directory exists
-    const memoryDir = path.dirname(MEMORY_FILE_PATH);
+    const memoryDir = path.dirname(memoryPath);
     try {
         await fs.mkdir(memoryDir, { recursive: true });
     } catch (err) {
-        // Ignore errors if directory already exists or permission issues
         if (err.code !== 'EEXIST' && err.code !== 'EPERM') {
             throw err;
         }
     }
+    
     // Initialize git sync if enabled
     if (gitSync.isEnabled()) {
         await gitSync.initRepo(memoryDir);
     }
-    // Initialize knowledge graph manager first (without searchIntegrator reference yet)
-    knowledgeGraphManager = new KnowledgeGraphManager(MEMORY_FILE_PATH);
-    // Initialize search integrator for TF-IDF + Fuse.js hybrid search
-    searchIntegrator = new SearchIntegrator(knowledgeGraphManager);
-    // Now inject searchIntegrator reference back to knowledgeGraphManager
+    
+    const knowledgeGraphManager = new KnowledgeGraphManager(memoryPath);
+    const searchIntegrator = new SearchIntegrator(knowledgeGraphManager);
     knowledgeGraphManager.searchIntegrator = searchIntegrator;
+    
+    return { knowledgeGraphManager, searchIntegrator };
+}
+
+async function main() {
+    // Initialize managers
+    const { knowledgeGraphManager: manager, searchIntegrator: si } = await createManagers();
+    knowledgeGraphManager = manager;
+    searchIntegrator = si;
     
     // Load graph first for stats display
     const graph = await knowledgeGraphManager.loadGraph();
