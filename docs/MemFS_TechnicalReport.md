@@ -282,31 +282,120 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 17 个工具：
    这种设计的优势是写时复制（Copy-on-Write）的基础。
    
 #### 2.5.4 写时复制（Copy-on-Write）
-   
-   当需要修改一个被多个实体共享的观察时，MemFS 自动创建新副本，避免影响其他实体：
-   
-   ```javascript
-   // 场景：张三的"程序员"要改为"资深程序员"
-   await updateNode({
-   entityName: "张三",
-   observationUpdates: [
-    { oldContent: "程序员", newContent: "资深程序员" }
-   ]
-   });
-   // 结果：张三获得新观察 ID，李四保持原观察 ID
-   {
-   entities: [
-    { name: "张三", observationIds: [4] },
+
+当需要修改一个被多个实体共享的观察时，MemFS 自动创建新副本，避免影响其他实体。
+
+**实现位置**：`index.js` 第 1147-1181 行
+
+**核心算法**：
+
+```javascript
+// Handle observation updates (copy-on-write)
+if (observationUpdates && Array.isArray(observationUpdates)) {
+    let maxObsId = graph.observations.length > 0 
+        ? Math.max(...graph.observations.map(o => o.id))
+        : 0;
+    
+    for (const obsUpdate of observationUpdates) {
+        const { oldContent, newContent } = obsUpdate;
+        
+        // 1. 查找要修改的观察
+        const existingObs = graph.observations.find(o => o.content === oldContent);
+        
+        if (existingObs) {
+            // 2. 检查是否有其他实体引用此观察
+            const otherEntities = graph.entities.filter(e => 
+                e.name !== entityName && 
+                e.observationIds?.includes(existingObs.id)
+            );
+            
+            // 3. 判断：共享 OR 独占
+            if (otherEntities.length > 0) {
+                // ===== 共享观察：执行 Copy-on-Write =====
+                // 创建新观察，继承 createdAt
+                const newId = ++maxObsId;
+                graph.observations.push({
+                    id: newId,
+                    content: newContent,
+                    createdAt: existingObs.createdAt,  // 继承原始创建时间
+                    updatedAt: getCurrentTimestamp()     // 标记为新版本
+                });
+                // 更新当前实体的引用：从旧 ID 切换到新 ID
+                entity.observationIds = entity.observationIds.map(id => 
+                    id === existingObs.id ? newId : id
+                );
+            } else {
+                // ===== 独占观察：直接修改 =====
+                existingObs.content = newContent;
+                existingObs.updatedAt = getCurrentTimestamp();
+            }
+        }
+    }
+}
+```
+
+**执行流程图**：
+
+```mermaid
+flowchart TD
+    A["updateNode 调用"] --> B{"观察被其他实体引用?"}
+    B -->|是| C["创建新观察 ID"]
+    C --> D["新观察继承 createdAt"]
+    D --> E["设置 updatedAt"]
+    E --> F["实体引用切换到新 ID"]
+    B -->|否| G["直接修改原观察"]
+    G --> H["更新 updatedAt"]
+    F --> I["saveGraph 持久化"]
+    H --> I
+```
+
+**场景示例**：
+
+```javascript
+// 初始状态：两个实体共享同一观察
+{
+  entities: [
+    { name: "张三", observationIds: [1] },
     { name: "李四", observationIds: [1] }
-   ],
-   observations: [
-    { id: 1, content: "程序员" },      // 李四仍在使用
-    { id: 4, content: "资深程序员" }     // 张三的新观察
-   ]
-   }
-   ```
-   
-**重要意义**：这使得多个实体可以独立地丰富或修正共享知识，而不会产生冲突。
+  ],
+  observations: [
+    { id: 1, content: "程序员", createdAt: {...} }
+  ]
+}
+
+// 执行：张三的"程序员"改为"资深程序员"
+await updateNode({
+    entityName: "张三",
+    observationUpdates: [
+        { oldContent: "程序员", newContent: "资深程序员" }
+    ]
+});
+
+// 结果：观察被复制，张三指向新版本
+{
+  entities: [
+    { name: "张三", observationIds: [4] },  // 指向新观察
+    { name: "李四", observationIds: [1] }    // 保持原观察
+  ],
+  observations: [
+    { id: 1, content: "程序员", createdAt: {...} },        // 李四仍在使用
+    { id: 4, content: "资深程序员", createdAt: {...}, updatedAt: {...}  // 张三的新观察
+  ]
+}
+```
+
+**时间戳语义**：
+
+| 字段 | 含义 | 说明 |
+|-----|------|-----|
+| `createdAt` | 原始创建时间 | Copy-on-Write 后继承，保持知识的原始时间 |
+| `updatedAt` | 最后修改时间 | 仅当观察被修改时存在，直接修改时也会更新 |
+
+**重要意义**：
+1. **数据独立性**：多个实体可独立演进共享知识
+2. **历史可追溯**：通过 `createdAt` 可追溯原始创建时间
+3. **版本追踪**：`updatedAt` 标记每次修改
+4. **无数据丢失**：旧版本观察保留，其他实体不受影响
    
 #### 2.5.5 孤儿检测与垃圾回收
    
@@ -321,6 +410,77 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 17 个工具：
    ```
    
 这类似于文件系统的 TRIM 磁盘清理，帮助保持知识库的整洁。
+
+#### 2.5.6 Git 自动提交（Auto-Commit）
+
+MemFS 支持在每次保存时自动提交到 Git，实现知识库的历史版本管理。
+
+**环境变量**：`GITAUTOCOMMIT=true`
+
+**实现位置**：`index.js` 第 80-236 行（`gitSync` 对象）
+
+**Commit 格式**：
+
+```
+auto-commit:[operationContext] at [utc:YYYY-MM-DDTHH:mm:ss.SSSZ] [tz:Asia/Shanghai]
+```
+
+**字段说明**：
+
+| 字段 | 示例 | 说明 |
+|-----|------|------|
+| `operationContext` | `[createEntity "韦伯", "涂尔干"]` | 操作类型及涉及的实体 |
+| `utc` | `[utc:2026-04-04T10:30:00.000Z]` | UTC 时间戳 |
+| `tz` | `[tz:Asia/Shanghai]` | 本地时区 |
+
+**完整示例**：
+
+```
+auto-commit:[createEntity "韦伯", "涂尔干"] at [utc:2026-04-04T10:30:00.000Z] [tz:Asia/Shanghai]
+auto-commit:[updateNode "马克思"] at [utc:2026-04-04T10:35:00.000Z] [tz:Asia/Shanghai]
+auto-commit:[deleteEntity "过时概念"] at [utc:2026-04-04T10:40:00.000Z] [tz:Asia/Shanghai]
+```
+
+**Git Author 配置**：
+
+MemFS 自动配置 Git 用户信息，便于识别提交来源：
+
+| 配置项 | 格式 | 示例 |
+|-----|------|------|
+| `user.name` | `memfs-{version}` | `memfs-2.4.12` |
+| `user.email` | `username-memfs@hostname` | `qtgcy-memfs@DESKTOP-XXX` |
+
+**实现代码**：
+
+```javascript
+// index.js 第 174-179 行
+// Configure user (required for commits) - always set even if repo already exists
+// Format: author:"memfs-(version)", email:"username-memfs@hostname"
+const username = userInfo().username;
+const hostnameStr = hostname();
+await this.execGit(['config', 'user.email', `${username}-memfs@${hostnameStr}`], dir);
+await this.execGit(['config', 'user.name', `memfs-${VERSION}`], dir);
+```
+
+**Commit Message 生成**：
+
+```javascript
+// index.js 第 222-224 行
+const timestamp = new Date().toISOString();
+const tz = getSystemTimezone();
+const opInfo = operationContext ? `${operationContext}` : '';
+const commitMsg = `auto-commit:[${opInfo}] at [utc:${timestamp}] [tz:${tz}]`;
+```
+
+**查看提交历史**：
+
+使用 `getConsole` 工具可查看带 Author 信息的提交记录：
+
+```javascript
+await getConsole();
+// 输出格式: %h %an <%ae> %s
+// 例如: a1b2c3d qtgcy-memfs <qtgcy-memfs@DESKTOP-XXX> auto-commit:[createEntity "韦伯"] at [utc:...]
+```
 
 ---
 

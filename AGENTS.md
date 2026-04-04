@@ -183,7 +183,8 @@ console.error('DETECTED: ...');        // → level: 'error'
 ### Git Auto-Commit (GITAUTOCOMMIT)
 - Enabled via `GITAUTOCOMMIT=true` env var
 - Auto-commits on every `saveGraph()` call
-- Commit message: `chore: auto-sync (operation details) at UTC YYYY-MM-DDTHH:mm:ss.SSSZ`
+- Commit message: `auto-commit:[operationContext] at [utc:YYYY-MM-DDTHH:mm:ss.SSSZ] [tz:Asia/Shanghai]`
+- Git author: `user.name: memfs-{version}`, `user.email: username-memfs@hostname`
 - Operation context tracked via `lastOperation` in KnowledgeGraphManager
 
 ### Timestamp Format
