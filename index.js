@@ -6,11 +6,14 @@ import Fuse from 'fuse.js';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { homedir } from 'os';
+import { homedir, hostname, userInfo } from 'os';
 import { execSync, execFileSync } from 'child_process';
 
 // Import search modules
 import { SearchIntegrator } from './src/tfidf/searchIntegrator.js';
+
+// Global constants
+const VERSION = "2.4.12";
 
 // Get user home directory with fallback
 function getHomeDir() {
@@ -158,29 +161,25 @@ const gitSync = {
         // Check if already a git repo
         if (await this.isGitRepo(dir)) {
             this.log('info', 'Git repo already exists at ' + dir);
-            this.initialized = true;
-            return true;
+        } else {
+            // Initialize new git repo
+            const result = await this.execGit(['init'], dir);
+            if (!result.success) {
+                this.log('error', 'Failed to initialize git repo: ' + result.error);
+                return false;
+            }
+            this.log('info', 'Initialized new git repo at ' + dir);
         }
         
-        // Initialize new git repo
-        const result = await this.execGit(['init'], dir);
-        if (result.success) {
-            this.log('info', 'Initialized new git repo at ' + dir);
-            
-            // Configure user (required for commits)
-            await this.execGit(['config', 'user.email', `memfs@${os.hostname()}`], dir);
-            await this.execGit(['config', 'user.name', 'MemFS Auto-Sync'], dir);
-            
-            // Note: We don't create initial commit here because memory.jsonl
-            // may not exist yet. autoCommit will handle commits when files are created.
-            this.log('info', 'Git repo ready, waiting for first change to commit');
-            
-            this.initialized = true;
-            return true;
-        } else {
-            this.log('error', 'Failed to initialize git repo: ' + result.error);
-            return false;
-        }
+        // Configure user (required for commits) - always set even if repo already exists
+        // Format: author:"memfs-(version)", email:"username-memfs@hostname"
+        const username = userInfo().username;
+        const hostnameStr = hostname();
+        await this.execGit(['config', 'user.email', `${username}-memfs@${hostnameStr}`], dir);
+        await this.execGit(['config', 'user.name', `memfs-${VERSION}`], dir);
+        
+        this.initialized = true;
+        return true;
     },
     
     // Auto-commit memory file changes
@@ -218,10 +217,11 @@ const gitSync = {
             }
             
             // git commit with timestamp and operation context
-            // Format: auto-sync: (opType details) at UTC YYYY-MM-DDTHH:mm:ss.SSSZ
+            // Format: auto-commit:[operationContext] at [utc:YYYY-MM-DDTHH:mm:ss.SSSZ] [tz:Asia/Shanghai]
             const timestamp = new Date().toISOString(); // ISO 8601 UTC format
-            const opInfo = operationContext ? ` (${operationContext})` : '';
-            const commitMsg = `auto-sync:${opInfo} at UTC ${timestamp}`;
+            const tz = getSystemTimezone();
+            const opInfo = operationContext ? `${operationContext}` : '';
+            const commitMsg = `auto-commit:[${opInfo}] at [utc:${timestamp}] [tz:${tz}]`;
             
             const commitResult = this.execGit(['commit', '-m', commitMsg], dir);
             if (commitResult.success) {
@@ -1533,7 +1533,6 @@ const ObservationSchema = z.object({
     createdAt: z.string().nullable()
 });
 // The server instance and tools exposed to Claude
-const VERSION = "2.4.12";
 const server = new McpServer({
     name: "MemFS",
     version: VERSION,
@@ -1569,7 +1568,8 @@ server.registerTool("getConsole", {
     
     // Get recent git log if git sync is enabled and initialized
     if (gitSync.isEnabled() && gitSync.initialized) {
-        const logResult = await gitSync.execGit(['log', '--oneline', '-10'], gitSync.memoryDir);
+        // Format: %h %an <%ae> %s (short hash, author name, email, subject)
+        const logResult = await gitSync.execGit(['log', '--format=%h %an <%ae> %s', '-10'], gitSync.memoryDir);
         if (logResult.success) {
             const commits = logResult.output.trim().split('\n');
             for (const commit of commits) {
@@ -1578,10 +1578,10 @@ server.registerTool("getConsole", {
         }
     }
     
-    // Easter egg for 洛正绫's 11th birthday
+    // Easter egg for 乐正绫's 11th birthday
     if (easterEgg) {
         lines.push('');
-        lines.push('🎉 "乐正司百曲，绫动万年红" —— 绫姐11周年生日快乐！');
+        lines.push('🎉 "乐正司百曲，绫动万年红" —— 阿绫11周年生日快乐！');
     }
     
     return {
@@ -2144,18 +2144,20 @@ async function main() {
         ? new Date(graph._lastModified).toISOString().replace('T', ' ').substring(0, 19) + ' UTC'
         : 'N/A';
     
+    // Build index synchronously first to get size for stats display
+    await searchIntegrator.ensureIndex();
+    const indexSize = searchIntegrator.getIndexSize();
+    const indexSizeStr = indexSize >= 1024 * 1024 
+        ? `${(indexSize / (1024 * 1024)).toFixed(2)} MB`
+        : indexSize >= 1024 
+            ? `${(indexSize / 1024).toFixed(2)} KB`
+            : `${indexSize} B`;
+    
     const transport = new StdioServerTransport();
     await server.connect(transport);
     console.error(`[MCP Server] MemFS v${VERSION} running on stdio`);
     console.error(`[Stats] ${entityCount} entities | ${observationCount} observations | ${relationCount} relations | last updated ${lastUpdated}`);
-    
-    // Build index in background after server is connected and ready
-    setTimeout(() => {
-        const indexStart = Date.now();
-        searchIntegrator.ensureIndex().then(() => {
-            console.error(`[MCP Server] Search index ready in ${Date.now() - indexStart}ms`);
-        });
-    }, 100); // Small delay to ensure connection is fully established
+    console.error(`[Stats] Index size: ${indexSizeStr}`);
 }
 main().catch((error) => {
     console.error("Fatal error in main():", error);

@@ -4,6 +4,39 @@
  */
 
 /**
+ * Format timestamp object to string for API response
+ * Input: {utc: "ISO8601", timezone: "IANA"} or string or null
+ * Output: "YYYY-MM-DD HH:mm:ss Timezone" or null
+ */
+function formatTimestampForApi(ts) {
+    if (!ts) return null;
+    if (typeof ts === 'string') return ts;
+    if (typeof ts === 'object' && ts.utc && ts.timezone) {
+        // Use Intl.DateTimeFormat to properly convert UTC to local timezone
+        const formatter = new Intl.DateTimeFormat('en-CA', {
+            timeZone: ts.timezone,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+        const parts = formatter.formatToParts(new Date(ts.utc));
+        const getPart = (type) => parts.find(p => p.type === type).value;
+        const y = getPart('year');
+        const mo = getPart('month');
+        const d = getPart('day');
+        const h = getPart('hour');
+        const mi = getPart('minute');
+        const s = getPart('second');
+        return `${y}-${mo}-${d} ${h}:${mi}:${s} ${ts.timezone}`;
+    }
+    return null;
+}
+
+/**
  * Traditional Searcher
  * Maintains existing search behavior for basicFetch=true
  */
@@ -106,7 +139,7 @@ export class TraditionalSearcher {
                 return obs ? {
                     id: obs.id,
                     content: obs.content,
-                    createdAt: time ? (obs.createdAt || null) : null
+                    createdAt: time ? formatTimestampForApi(obs.createdAt) : null
                 } : null;
             })
             .filter(o => o !== null);
@@ -185,7 +218,7 @@ export class TraditionalSearcher {
                 return obs ? {
                     id: obs.id,
                     content: obs.content,
-                    createdAt: time ? (obs.createdAt || null) : null
+                    createdAt: time ? formatTimestampForApi(obs.createdAt) : null
                 } : null;
             })
             .filter(o => o !== null);

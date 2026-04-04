@@ -378,6 +378,58 @@ export class NaturalTfIdfSearcher {
     }
 
     /**
+      * Calculate index size in bytes
+      */
+    getIndexSize() {
+        let bytes = 0;
+
+        // documents: Map<docId, { entityName, field, content, tokens: Set }>
+        this.documents.forEach((doc, docId) => {
+            bytes += String(docId).length;
+            bytes += doc.entityName.length;
+            bytes += doc.field.length;
+            bytes += doc.content.length;
+            if (doc.tokens instanceof Set) {
+                doc.tokens.forEach(token => { bytes += token.length; });
+            }
+        });
+
+        // docIdToIndex: Map
+        this.docIdToIndex.forEach((v, k) => {
+            bytes += String(k).length + String(v).length;
+        });
+
+        // indexToDocId: Array
+        this.indexToDocId.forEach(id => { bytes += String(id).length; });
+
+        // entityIndex: Map<entityName, Set<docId>>
+        this.entityIndex.forEach((docIds, entityName) => {
+            bytes += entityName.length;
+            docIds.forEach(id => { bytes += String(id).length; });
+        });
+
+        // invertedIndex: Map<token, Map<docId, count>>
+        this.invertedIndex.forEach((docMap, token) => {
+            bytes += token.length;
+            docMap.forEach((count, docId) => {
+                bytes += String(docId).length + 8; // number bytes
+            });
+        });
+
+        // docFrequency: Map<token, count>
+        this.docFrequency.forEach((count, token) => {
+            bytes += token.length + 8;
+        });
+
+        // docLengths: Map<docId, length>
+        this.docLengths.forEach((len, docId) => {
+            bytes += String(docId).length + 8;
+        });
+
+        return bytes;
+    }
+
+    /**
       * Get index statistics
       */
     getStats() {
@@ -385,7 +437,8 @@ export class NaturalTfIdfSearcher {
             totalDocuments: this.documents.size,
             totalTokens: this.invertedIndex.size,
             avgDocLength: this.avgDocLength,
-            fieldWeights: this.options.fieldWeights
+            fieldWeights: this.options.fieldWeights,
+            indexSizeBytes: this.getIndexSize()
         };
     }
 }

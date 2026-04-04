@@ -48,11 +48,18 @@
 
 **核心功能：**
 - 每次 `saveGraph()` 自动提交到 Git
-- 提交格式：`auto-sync: (createEntity "Weber") at UTC YYYY-MM-DDTHH:mm:ss.SSSZ`
-- 实体名称用双引号包裹
+- 提交格式：`auto-commit:[operationContext] at [utc:YYYY-MM-DDTHH:mm:ss.SSSZ] [tz:Asia/Shanghai]`
+- 实体名称用双引号包裹，多个实体用逗号分隔
+
+**Git Author 配置：**
+- `user.name`: `memfs-{version}` (例如 `memfs-2.4.12`)
+- `user.email`: `username-memfs@hostname` (例如 `qtgcy-memfs@DESKTOP-XXX`)
+
+**getConsole 工具输出格式：**
+- 包含 author 和 email：`%h %an <%ae> %s`
 
 **新增文件：**
-- `gitSync` 模块 (~168 行)
+- `gitSync` 模块 (~200 行)
 - `getConsole` 工具
 - `test_gitsync.mjs`
 - `test_mcp_full.mjs`
