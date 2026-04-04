@@ -88,7 +88,7 @@ GITAUTOCOMMIT=true node index.js
 New `GITAUTOCOMMIT=true` environment variable — every operation auto-commits to Git:
 
 ```
-auto-sync: (createEntity "Weber") at UTC 2026-03-28T12:34:56.789Z
+auto-commit:[createEntity "Weber"] at [utc:2026-03-28T12:34:56.789Z] [tz:Asia/Shanghai]
 ```
 
 ### searchNode Refactoring
@@ -362,6 +362,15 @@ GITAUTOCOMMIT=true node index.js
 
 ### Commit Format
 
+```
+auto-commit:[operationContext] at [utc:YYYY-MM-DDTHH:mm:ss.SSSZ] [tz:Asia/Shanghai]
+```
+
+Example:
+```
+auto-commit:[createEntity "Weber"] at [utc:2026-03-22T09:15:30.123Z] [tz:Asia/Shanghai]
+auto-commit:[updateNode "Durkheim"] at [utc:2026-03-22T09:16:45.456Z] [tz:Asia/Shanghai]
+auto-commit:[deleteRelation "Weber"→"Durkheim"] at [utc:2026-03-22T09:17:00.789Z] [tz:Asia/Shanghai]
 ```
 auto-sync: (operation_type "details") at UTC YYYY-MM-DDTHH:mm:ss.SSSZ
 ```
