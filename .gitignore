@@ -5,3 +5,9 @@ memory/memory.jsonl
 private_test_usages/
 .opencode/
 nul
+test_cache/
+temp/
+# Test temp files
+.test_*.jsonl
+.test_mcp_*/
+.memfs/

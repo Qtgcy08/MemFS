@@ -15,7 +15,7 @@
  */
 function generateNGram(str, n) {
     if (str.length < n) {
-        return [];  // Don't return single chars as n-gram
+        return str.length > 0 ? [str] : [];
     }
     const tokens = [];
     for (let i = 0; i <= str.length - n; i++) {
@@ -25,64 +25,51 @@ function generateNGram(str, n) {
 }
 
 /**
- * Check if text is primarily Chinese
+ * 清洗文本：去除符号和空格（与查询端统一）
  * @param {string} text - Input text
- * @returns {boolean} True if text is primarily Chinese
+ * @returns {string} Cleaned text
  */
-function isChineseText(text) {
+function cleanText(text) {
     if (!text || typeof text !== 'string') {
-        return false;
+        return '';
     }
-    // Count Chinese characters (Unicode range for Chinese)
-    const chineseChars = text.match(/[\u4e00-\u9fa5]/g) || [];
-    // Check if Chinese characters are at least 50% of non-whitespace chars
-    const nonWhitespace = text.replace(/\s/g, '');
-    if (nonWhitespace.length === 0) return false;
-    return (chineseChars.length / nonWhitespace.length) >= 0.5;
+    return text
+        .replace(/[\u3000-\u303f\uff00-\uffef!@#$%^&*()=\[\]{}|;':",.\/<>?`~\\]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 /**
- * Tokenize text for BM25 indexing
- * Uses n-gram for better Chinese/foreign language support
+ * 索引时切片预处理
+ * 遵循《苦涩的教训》：统一 2~(n-1) gram，无语言知识
  * @param {string} text - Input text
  * @returns {string[]} Tokenized terms
  */
 function tokenizeForIndex(text) {
-    if (!text || typeof text !== 'string') {
+    const cleaned = cleanText(text);
+
+    if (!cleaned) {
         return [];
     }
 
     const tokens = new Set();
 
-    // Always add full text for exact matching
-    tokens.add(text);
+    // Full text for exact matching
+    tokens.add(cleaned);
 
-    // Check if text is primarily Chinese
-    const isChinese = isChineseText(text);
-
-    if (isChinese) {
-        // For Chinese text, use 2-gram for word matching
-        if (text.length >= 2) {
-            const bigrams = generateNGram(text, 2);
-            bigrams.forEach(t => tokens.add(t));
-        }
-    } else {
-        // For English/text, start with 3-gram
-        if (text.length >= 3) {
-            const trigrams = generateNGram(text, 3);
-            trigrams.forEach(t => tokens.add(t));
-        }
+    // Incremental n-gram: avoid O(n²) explosion for short texts
+    // n<=2: 全词 only (already added)
+    // n=3: 全词 + 2-gram
+    // n=4: 全词 + 2-gram + 3-gram
+    // n>=5: 全词 + 2-gram + 3-gram + 4-gram
+    if (cleaned.length >= 3) {
+        generateNGram(cleaned, 2).forEach(t => tokens.add(t));
     }
-
-    // Add 4-gram and 5-gram for longer substring matching
-    if (text.length >= 4) {
-        const fourgrams = generateNGram(text, 4);
-        fourgrams.forEach(t => tokens.add(t));
+    if (cleaned.length >= 4) {
+        generateNGram(cleaned, 3).forEach(t => tokens.add(t));
     }
-
-    if (text.length >= 5) {
-        const fivegrams = generateNGram(text, 5);
-        fivegrams.forEach(t => tokens.add(t));
+    if (cleaned.length >= 5) {
+        generateNGram(cleaned, 4).forEach(t => tokens.add(t));
     }
 
     return Array.from(tokens);
@@ -123,13 +110,8 @@ export class NaturalTfIdfSearcher {
         this.indexBuilt = false;
 
         this.options = {
-            // Field weights
-            fieldWeights: options.fieldWeights || {
-                'name': 3.0,         // Entity name - highest weight
-                'entityType': 2.0,   // Entity type
-                'definition': 2.0,   // Definition
-                'observation': 2.0    // Observation
-            },
+            // Field weights - use passed value or fallback to empty (inherit from HybridSearchService)
+            fieldWeights: options.fieldWeights || {},
             ...options
         };
     }
@@ -169,6 +151,13 @@ export class NaturalTfIdfSearcher {
         entities.forEach(entity => {
             if (entity.definition) {
                 this._addDocument(entity.definition, entity.name, 'definition', entity);
+            }
+        });
+
+        // Index definition sources
+        entities.forEach(entity => {
+            if (entity.definitionSource) {
+                this._addDocument(entity.definitionSource, entity.name, 'definitionSource', entity);
             }
         });
 
@@ -293,7 +282,12 @@ export class NaturalTfIdfSearcher {
 
     /**
       * Search using BM25
-      */
+       * @param {string} query - Search query (used for debug/info if tokens provided)
+       * @param {object} options - Search options
+       * @param {string[]} [options.tokens] - Pre-tokenized query tokens (to use penalties)
+       * @param {number[]} [options.tokenPenalties] - Penalties for each token (aligned with tokens array)
+       * @param {number} [options.topK=100] - Number of results to return
+       */
     search(query, options = {}) {
         // Index is considered "built" if buildIndex was called (even if empty)
         // We track this via a separate flag instead of checking indexToDocId.length
@@ -301,10 +295,12 @@ export class NaturalTfIdfSearcher {
             throw new Error('Index not built. Call buildIndex() first.');
         }
 
-        const { topK = 100 } = options;
+        const { topK = 100, tokens: providedTokens, tokenPenalties } = options;
 
-        // Generate n-gram tokens for query
-        const queryTokens = new Set(tokenizeForIndex(query.toLowerCase()));
+        // Use provided tokens or generate new ones
+        const queryTokens = providedTokens
+            ? new Set(providedTokens)
+            : new Set(tokenizeForIndex(query.toLowerCase()));
 
         if (queryTokens.size === 0) {
             return [];
@@ -325,8 +321,16 @@ export class NaturalTfIdfSearcher {
                 const field = doc.field;
                 let docScore = 0;
 
-                queryTokens.forEach(token => {
-                    docScore += this._bm25(token, docId);
+                // Apply token penalties if provided
+                const hasPenalties = tokenPenalties && tokenPenalties.length > 0;
+                
+                queryTokens.forEach((token, index) => {
+                    const bm25Score = this._bm25(token, docId);
+                    // Apply token penalty if available
+                    const penalty = hasPenalties && tokenPenalties[index] !== undefined
+                        ? tokenPenalties[index]
+                        : 1.0;
+                    docScore += bm25Score * penalty;
                 });
 
                 // Only add this field's contribution if it actually has matches
@@ -374,6 +378,58 @@ export class NaturalTfIdfSearcher {
     }
 
     /**
+      * Calculate index size in bytes
+      */
+    getIndexSize() {
+        let bytes = 0;
+
+        // documents: Map<docId, { entityName, field, content, tokens: Set }>
+        this.documents.forEach((doc, docId) => {
+            bytes += String(docId).length;
+            bytes += doc.entityName.length;
+            bytes += doc.field.length;
+            bytes += doc.content.length;
+            if (doc.tokens instanceof Set) {
+                doc.tokens.forEach(token => { bytes += token.length; });
+            }
+        });
+
+        // docIdToIndex: Map
+        this.docIdToIndex.forEach((v, k) => {
+            bytes += String(k).length + String(v).length;
+        });
+
+        // indexToDocId: Array
+        this.indexToDocId.forEach(id => { bytes += String(id).length; });
+
+        // entityIndex: Map<entityName, Set<docId>>
+        this.entityIndex.forEach((docIds, entityName) => {
+            bytes += entityName.length;
+            docIds.forEach(id => { bytes += String(id).length; });
+        });
+
+        // invertedIndex: Map<token, Map<docId, count>>
+        this.invertedIndex.forEach((docMap, token) => {
+            bytes += token.length;
+            docMap.forEach((count, docId) => {
+                bytes += String(docId).length + 8; // number bytes
+            });
+        });
+
+        // docFrequency: Map<token, count>
+        this.docFrequency.forEach((count, token) => {
+            bytes += token.length + 8;
+        });
+
+        // docLengths: Map<docId, length>
+        this.docLengths.forEach((len, docId) => {
+            bytes += String(docId).length + 8;
+        });
+
+        return bytes;
+    }
+
+    /**
       * Get index statistics
       */
     getStats() {
@@ -381,7 +437,8 @@ export class NaturalTfIdfSearcher {
             totalDocuments: this.documents.size,
             totalTokens: this.invertedIndex.size,
             avgDocLength: this.avgDocLength,
-            fieldWeights: this.options.fieldWeights
+            fieldWeights: this.options.fieldWeights,
+            indexSizeBytes: this.getIndexSize()
         };
     }
 }

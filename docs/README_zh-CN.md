@@ -1,4 +1,4 @@
-# 🧠 MemFS
+c:\Users\Qtgcy\.astrbot_launcher\instances\87376e80-3fb7-4eb9-8c89-c05dec434372\core\.venv# 🧠 MemFS
 
 **基于 MCP server-memory 深度重构的知识图谱管理系统**
 
@@ -44,6 +44,9 @@ node index.js
 
 # 或者指定自定义存储目录
 MEMORY_DIR=~/my-knowledge
+
+# 启用 Git 自动同步（每次保存自动提交）
+GITAUTOCOMMIT=true node index.js
 ```
 
 ### 配置为 MCP 服务器
@@ -73,6 +76,40 @@ MEMORY_DIR=~/my-knowledge
   }
 }
 ```
+
+---
+
+## 📰 2.4.12 更新公告
+
+### Git 自动提交
+
+新增 `GITAUTOCOMMIT=true` 环境变量，启用后每次操作自动提交到 Git：
+
+```
+auto-sync: (createEntity "韦伯") at UTC 2026-03-28T12:34:56.789Z
+```
+
+### searchNode 重构
+
+- 返回结构简化为 `{ entities, observations, relations }`
+- 移除 `searchMode` 字段
+- `observations` 增加 `updatedAt` 字段
+- 关联实体总数受 `limit` 限制
+- 统一分词系统：移除语言检测，改为 2~(n-1) gram 统一切分
+- 2-gram 惩罚系数 **×0.5**：短词匹配不再过度命中
+- 字段权重统一管理
+- `definitionSource` 加入搜索索引
+- 关系类型匹配 boost
+
+### 操作返回重构
+
+- 写操作返回消息精简，减少 LLM token 消耗
+- 删除操作返回完整数据，便于撤销
+- `deleteObservation` 改为 ID 输入
+
+### 辅助工具
+
+- 新增 `getConsole` 工具获取缓冲日志
 
 ---
 
@@ -151,7 +188,6 @@ flowchart TD
 | `readObservation` | 根据 ID 批量读取观察    | 核查具体观察内容  |
 | `listNode`        | 列出所有实体概览        | 浏览知识库结构   |
 | `listGraph`       | 读取整个知识图谱        | 批量导出、迁移   |
-| `howWork`         | 获取推荐工作流指导       | 了解系统使用方法  |
 
 ### 更新类
 
@@ -169,6 +205,13 @@ flowchart TD
 | `deleteObservation`    | 解除观察链接（保留观察） | 移除引用   |
 | `getOrphanObservation` | 查找孤儿观察       | 发现无效数据 |
 | `recycleObservation`   | 回收并永久删除观察    | 清理无用数据 |
+
+### 辅助工具
+
+| 工具          | 功能                    | 示例              |
+| ----------- | --------------------- | ---------------- |
+| `getConsole` | 获取控制台消息和 Git 提交日志   | 查看自动提交历史     |
+| `howWork`         | 获取推荐工作流指导       | 了解系统使用方法  |
 
 ---
 
@@ -203,12 +246,13 @@ await searchNode("社会学", {
 
 ### 字段权重
 
-| 字段          | 权重  | 说明        |
-| ----------- | --- | --------- |
-| name        | 5.0 | 最高 - 实体名称 |
-| entityType  | 4.0 | 实体类型      |
-| definition  | 4.0 | 定义描述      |
-| observation | 3.0 | 观察内容      |
+| 字段 | 权重 | 说明 |
+|------|------|------|
+| name | 5.0 | 最高 - 实体名称 |
+| entityType | 2.5 | 实体类型 |
+| definition | 2.5 | 定义描述 |
+| definitionSource | 1.5 | 定义来源 |
+| observation | 1.0 | 观察内容 |
 
 ---
 
@@ -273,8 +317,10 @@ await updateNode({
 
 ```jsonl
 {"type":"entity","name":"韦伯","entityType":"人物","definition":"德国社会学家","definitionSource":"Wikipedia","observationIds":[1,2]}
+{"type":"entity","name":"涂尔干","entityType":"人物","definition":"法国社会学家","definitionSource":"Wikipedia","observationIds":[3]}
 {"type":"observation","id":1,"content":"《新教伦理与资本主义精神》作者","createdAt":{"utc":"2026-02-08T13:53:07Z","timezone":"Asia/Shanghai"}}
-{"type":"observation","id":2,"content":"与涂尔干、马克思并称社会学三大奠基人","createdAt":{"utc":"2026-02-08T14:00:00Z","timezone":"Asia/Shanghai"}}
+{"type":"observation","id":2,"content":"与涂尔干、马克思并称社会学三大奠基人","createdAt":{"utc":"2026-02-08T14:00:00Z","timezone":"Asia/Shanghai"},"updatedAt":{"utc":"2026-02-09T10:30:00Z","timezone":"Asia/Shanghai"}}
+{"type":"observation","id":3,"content":"《社会分工论》作者","createdAt":{"utc":"2026-02-08T15:00:00Z","timezone":"Asia/Shanghai"}}
 {"type":"relation","from":"韦伯","to":"涂尔干","relationType":"并称"}
 ```
 
@@ -285,19 +331,79 @@ await updateNode({
 | 默认    | `~/.memory/memory.jsonl`               |
 | 自定义目录 | `MEMORY_DIR=/path/to/data`             |
 
+### 环境变量
+
+| 变量              | 说明                    | 默认值              | 状态   |
+| --------------- | --------------------- | ---------------- | ---- |
+| `MEMORY_DIR`    | 数据存储目录                | `~/.memory`      | ✅ 推荐 |
+| `MEMORY_FILE_PATH` | 完整文件路径（已废弃）        | `~/.memory/memory.jsonl` | ⚠️ 废弃 |
+| `GITAUTOCOMMIT` | 启用 Git 自动提交（每次保存自动提交） | `false` | ✅ 推荐 |
+
+---
+
+## 🔄 Git 自动同步
+
+启用后，每次保存记忆文件都会自动提交到 Git，便于追踪变更历史。
+
+```bash
+# 启用 Git 自动提交
+GITAUTOCOMMIT=true node index.js
+
+# 或者在 MCP 配置中
+{
+  "environment": {
+    "MEMORY_DIR": "/path/to/data",
+    "GITAUTOCOMMIT": "true"
+  }
+}
+```
+
+### 提交格式
+
+```
+auto-sync: (操作类型 "详情") at UTC YYYY-MM-DDTHH:mm:ss.SSSZ
+```
+
+示例：
+```
+auto-sync: (createEntity "韦伯") at UTC 2026-03-22T09:15:30.123Z
+auto-sync: (updateNode "涂尔干") at UTC 2026-03-22T09:16:45.456Z
+auto-sync: (deleteRelation "韦伯"→"涂尔干") at UTC 2026-03-22T09:17:00.789Z
+```
+
+### 查看提交历史
+
+使用 `getConsole` 工具获取日志：
+
+```javascript
+await getConsole()
+// 返回文本内容，包含缓冲日志和以"[Git]"前缀的Git提交记录
+```
+
+---
+
+## 📦 旧版本
+
+v1.3.0 代码位于 `legacy` 分支：
+
+```bash
+git clone https://github.com/Qtgcy08/MemFS.git
+cd MemFS
+git checkout legacy
+```
+
+如果您正在使用 `MEMORY_FILE_PATH`，请在升级前迁移到 `MEMORY_DIR`。
+
 ---
 
 ## 🧪 测试
 
 ```bash
-# 完整测试套件（45个测试）
-node test_full.mjs
+# 完整测试套件（22个测试）
+node test_mcp_full.mjs
 
-# 混合搜索测试（38个测试）
-node test_hybrid_search.mjs
-
-# 观察搜索测试
-node test_observation_search.mjs
+# Git Sync 测试
+node test_gitsync.mjs
 ```
 
 ---
@@ -310,7 +416,7 @@ node test_observation_search.mjs
 | **数据共享**      | 不支持    | 硬链接式共享        |
 | **更新机制**      | 直接覆盖   | Copy-on-Write |
 | **检索能力**      | 简单关键词  | BM25 + 模糊搜索 |
-| **孤立检测**      | 无      | 支持            |
+| **孤立检测**      | 理论上不支持孤儿观察      | 支持            |
 | **缓存机制**      | 无      | 30秒TTL        |
 | **Windows兼容** | 未知     | 优雅降级          |
 
@@ -343,4 +449,4 @@ Apache License 2.0
 
 ---
 
-**用文件系统的方式管理知识，让混乱变得有序。**
+> **用文件系统的方式管理知识，让混乱变得有序。**

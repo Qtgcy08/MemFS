@@ -1,326 +1,223 @@
 # AGENTS.md
 
-This document provides guidelines for agentic coding agents operating in this repository.
+**MemFS** - Knowledge graph management system with BM25 + fuzzy search. Inspired by filesystem concepts (inode, hard links, copy-on-write).
 
-## Project Overview
+**Stack:** Node.js 22+ ES Modules | MCP SDK | Zod | Fuse.js 7.1.0 | Pure JS BM25
 
-**MemFS** - A knowledge graph management system based on MCP Memory Server with deep refactoring. Inspired by filesystem concepts (inode, hard links, copy-on-write).
+---
 
-**Key Technologies:**
-- Node.js 22+ with ES Modules
-- MCP (Model Context Protocol) SDK
-- Zod for runtime validation
-- 纯 JavaScript 实现 BM25（无外部依赖）
-- Fuse.js 7.1.0 for fuzzy search
+## Build, Lint, and Test
 
-## Build, Lint, and Test Commands
-
-### Installation
 ```bash
 npm install
-```
 
-### Running the Server
-```bash
+# Run server
 node index.js
-```
 
-### Running with Custom Memory File
-```bash
-# Using directory
-MEMORY_DIR=/path/to/data node index.js
+# With custom memory directory and git auto-commit
+MEMORY_DIR=~/data GITAUTOCOMMIT=true node index.js
 ```
 
 ### Testing
 ```bash
-# Run full test suite (45 tests, < 2s)
-node test_full.mjs
+# Syntax check (fast)
+node --check index.js
+node --check src/tfidf/hybridSearchService.js
 
-# Run hybrid search tests (38 tests)
-node test_hybrid_search.mjs
+# Full test suite (22 tests)
+node test_mcp_full.mjs
 
-# Run observation search tests
-node test_observation_search.mjs
+# Git Sync tests
+node test_gitsync.mjs
+
+# Run specific test only - edit test file to isolate single test
+# Open test_mcp_full.mjs and comment out other tests
 ```
 
-## Code Style Guidelines
+### Test Files
+| File | Purpose |
+|------|---------|
+| `test_mcp_full.mjs` | 22 tests for all MCP tools + Git Sync |
+| `test_gitsync.mjs` | Git auto-commit scenarios |
+| `debug_search.html` | Web UI for debugging searchNode (open in browser) |
+| `test_cache/` | Isolated test directory with own git repo |
 
-### Language and Module System
-- Use **ES Modules** (`import`/`export`) exclusively
-- Use `.js` file extension with `"type": "module"` in package.json
-- Avoid CommonJS `require()` syntax
+---
 
-### Imports
-Order: stdlib → third-party → local. Use named imports:
+## Code Style
+
+### Format
+- **4 spaces** indent, **single quotes**, **semicolons**, max **100 chars/line**
+
+### Imports (order: stdlib → third-party → local)
 ```javascript
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { z } from "zod";
-import { promises as fs } from 'fs';
-import { HybridSearchService } from './hybridSearchService.js';
+import { execFileSync } from 'child_process';  // stdlib
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";  // third-party
+import { SearchIntegrator } from './src/tfidf/searchIntegrator.js';  // local
 ```
 
-### Formatting
-- **4 spaces** for indentation
-- **Single quotes** for strings
-- **Semicolons** at end of statements
-- Max line length: 100 characters
-
-### Naming Conventions
+### Naming
 | Type | Convention | Example |
 |------|------------|---------|
-| Classes | PascalCase | `KnowledgeGraphManager`, `HybridSearchService` |
+| Classes | PascalCase | `KnowledgeGraphManager` |
 | Functions/Variables | camelCase | `loadGraph`, `memoryFilePath` |
-| Constants | camelCase | `defaultMemoryPath` |
-| Schemas | Suffix `Schema` | `EntitySchema` |
-| Tool Names | snake_case | `create_entities` |
+| Constants | UPPER_SNAKE_CASE | `DEFAULT_FIELD_WEIGHTS`, `BM25_K1` |
+| Schemas | PascalCase + Schema | `EntitySchema` |
 | MCP Tools | snake_case | `searchNode`, `recycleObservation` |
-| Search Modules | Suffix `Searcher/Service` | `NaturalTfIdfSearcher`, `FuseSearcher` |
 
-### Types and Data Structures
-- Use **Zod** for all validation
-- Use **async/await** for all async operations
-- Use **Sets** for unique collections
-- Use **Maps** for key-value lookups with complex keys
+### Hard Constraints
+- **Never** suppress types: `as any`, `@ts-ignore`, `@ts-expect-error`
+- **Never** leave code broken after failures
+- **Never** delete failing tests to "pass"
 
 ### Error Handling
 ```javascript
 catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === "ENOENT") {
+    if (error instanceof Error && error.code === "ENOENT") {
         return { entities: [], relations: [] };
     }
     throw error;
 }
 ```
-- Handle specific error codes before generic re-throw
+- Handle specific errors before generic re-throw
 - Use `process.exit(1)` for fatal main() errors
 
-### Hard Constraints
-- Never suppress type errors with `as any`, `@ts-ignore`, `@ts-expect-error`
-- Never leave code in broken state after failures
-- Never delete failing tests to "pass"
+---
 
-### JSONL Data Format
+## Architecture
 
-**New Format (Recommended):**
+### Data Model (JSONL)
 ```jsonl
-{"type":"entity","name":"Example","entityType":"concept","definition":"...","definitionSource":null,"observationIds":[1,2]}
-{"type":"observation","id":1,"content":"...","createdAt":{"utc":"2026-02-08T13:53:07Z","timezone":"Asia/Shanghai"},"updatedAt":{"utc":"2026-02-09T15:30:00Z","timezone":"Asia/Shanghai"}}
-{"type":"relation","from":"A","to":"B","relationType":"connected_to"}
+{"type":"entity","name":"Weber","entityType":"person","definition":"...","observationIds":[1,2]}
+{"type":"observation","id":1,"content":"...","createdAt":{"utc":"ISO8601","timezone":"Asia/Shanghai"},"updatedAt":{"utc":"ISO8601","timezone":"Asia/Shanghai"}}
+{"type":"relation","from":"Weber","to":"Durkheim","relationType":"contemporary"}
 ```
 
-**Legacy Formats (Backward Compatible):**
-```jsonl
-{"type":"observation","id":1,"content":"...","createdAt":"2026-02-08 21:53:07+0800"}
-{"type":"observation","id":2,"content":"...","createdAt":"2026-02-08T13:53:07Z"}
+### Filesystem-Inspired Design
+| Concept | Implementation |
+|---------|---------------|
+| Inode Table | Centralized observation storage |
+| Hard Links | Multi-entity observation sharing |
+| Copy-on-Write | Updates create new observations |
+| Orphan Detection | GC for unused observations |
+
+---
+
+## Search Architecture
+
+### Tokenization (Unified Gram System)
+Follows **The Bitter Lesson**: general methods over embedded knowledge.
+
+```
+Query: "明日方舟终末地 新中国风"
+    ↓ cleanText() (remove punctuation)
+    ↓ tokenizeQuery()
+    ├── fullQuery: "明日方舟终末地新中国风" (penalty=1.0, exact match boost)
+    ├── 2-gram: 明日, 日方, 方舟, 终末, 末地, 新中, 中国, 国风 (penalty=0.5)
+    ├── 3-gram: 明日方, 日方舟, ... (penalty=0.368)
+    ├── 4-gram: 明日方舟, ... (penalty=0.135)
+    └── 5-gram+: increasingly penalized
 ```
 
-### Timestamp Handling
+**Gram Penalty**: 2-gram gets 50% penalty to reduce false positives; longer grams use `1/e^(n-2)` decay.
 
-**Storage Format (New):**
-```javascript
-{
-    utc: "2026-02-09T14:02:06Z",      // UTC ISO 8601
-    timezone: "Asia/Shanghai",         // IANA timezone identifier
-    updatedAt: {                       // Optional, only set on updates (Copy-on-Write)
-        utc: "2026-02-09T15:30:00Z",
-        timezone: "Asia/Shanghai"
-    }
-}
-```
+> **Why 2-gram penalty?** Without it, short bigrams like "CA" could falsely match unrelated entities (e.g., "CA" in "Technical" matching "CA" in "CACG+"). The 50% penalty significantly reduces such false positive matches.
 
-**API Response Format:**
-- Returns local time with IANA timezone identifier
-- Example: `"2026-02-09 22:02:06 Asia/Shanghai"`
-- Legacy string formats are returned as-is (for backward compatibility)
+### Field Weights (Single Source of Truth)
+Defined in `hybridSearchService.js` as `DEFAULT_FIELD_WEIGHTS`:
 
-### Timestamp Helper Functions
+| Field | BM25 Weight | Fuse Weight |
+|-------|-------------|-------------|
+| name | 5.0 | 5.0 |
+| entityType | 2.5 | 2.5 |
+| definition | 2.5 | 2.5 |
+| definitionSource | 1.5 | 1.5 |
+| observation | 3.0 | 3.0 |
 
-**Core Functions (index.js):**
+### Scoring Pipeline
+1. **Tokenize** query → gram tokens with penalties
+2. **BM25 + Fuse** search independently (0.7 / 0.3)
+3. **Aggregate** with field weights
+4. **Boost** for fullQuery matches:
+   - fullQuery + name match: **10x** (5x base + 2x fusion)
+   - fullQuery + other field: **3x** (2x base + 1.5x fusion)
+5. **Relation matching**: relation type matching query grams → 1.5x boost
 
-| Function | Purpose | Returns |
-|----------|---------|---------|
-| `getSystemTimezone()` | Get IANA timezone from system | `"Asia/Shanghai"`, `"UTC"`, etc. |
-| `getCurrentTimestamp()` | Create timestamp for storage | `{utc, timezone}` object |
-| `parseTimestampToStorage()` | Parse API format back to storage | `{utc, timezone}` object |
-| `formatWithTimezone()` | Convert UTC to local time | `"YYYY-MM-DD HH:mm:ss Timezone"` |
-| `formatTimestamp()` | Format timestamp for API response | `{value, type}` object |
-| `formatObservationTimestamp()` | Format observation timestamps | `{createdAt, updatedAt}` object |
+### Relation Boost
+When relation type matches query gram tokens:
+- **Base score**: 0.5
+- **Match boost**: 1.5 (when relation type contains any query gram)
 
-**parseTimestampToStorage - Auto-convert on load:**
-```javascript
-// "2026-02-09 22:02:06 Asia/Shanghai" -> {utc, timezone} (NEW format converted)
-parseTimestampToStorage("2026-02-09 22:02:06 Asia/Shanghai")
-// Returns: { utc: "2026-02-09T14:02:06Z", timezone: "Asia/Shanghai" }
+---
 
-// "2026-02-08T08:18:30.317Z" -> stays as-is (legacy UTC)
-parseTimestampToStorage("2026-02-08T08:18:30.317Z")
-// Returns: "2026-02-08T08:18:30.317Z"
+## Key Patterns
 
-// "2026-02-08 14:28:29+0800" -> stays as-is (legacy offset)
-parseTimestampToStorage("2026-02-08 14:28:29+0800")
-// Returns: "2026-02-08 14:28:29+0800"
-```
-
-**formatTimestamp Return Format:**
-```javascript
-// New format with updatedAt
-formatTimestamp({utc, timezone, updatedAt}) 
-// Returns: { value: "2026-02-09 22:02:06 Asia/Shanghai", type: "updatedAt" }
-
-// New format without updatedAt
-formatTimestamp({utc, timezone}) 
-// Returns: { value: "2026-02-09 22:02:06 Asia/Shanghai", type: "createdAt" }
-
-// Legacy formats (returned as-is)
-formatTimestamp("2026-02-08T13:53:07Z") 
-// Returns: { value: "2026-02-08T13:53:07Z", type: "createdAt" }
-
-formatTimestamp("2026-02-08 21:53:07+0800") 
-// Returns: { value: "2026-02-08 21:53:07+0800", type: "createdAt" }
-```
-
-### Tool Registration Pattern
+### Tool Registration
 ```javascript
 server.registerTool("tool_name", {
     title: "Tool Title",
-    description: "Clear description",
-    inputSchema: { /* zod */ },
-    outputSchema: { /* zod */ }
+    description: "Description",
+    inputSchema: z.object({ ... }),
+    outputSchema: z.object({ ... })
 }, async ({ params }) => {
     const result = await manager.method(params);
     return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-        structuredContent: { ...result }
+        structuredContent: result
     };
 });
 ```
 
-### Response Format
+### Console Logging
 ```javascript
-// searchNode returns (simplified for LLM - _meta is internal debug only):
-{
-    entities: [...],
-    relations: [...],
-    observations: [...],
-    searchMode: 'hybrid' | 'traditional'
-}
+// Auto-level detection based on message content
+console.error('[GitSync] message');   // → level: 'info'
+console.error('[MCP Server] message'); // → level: 'info'
+console.error('[Stats] message');      // → level: 'info'
+console.error('[Deprecation]...');     // → level: 'warn'
+console.error('DETECTED: ...');        // → level: 'error'
 ```
-
-### Console Output
 - Use `console.error()` for server status
-- Use descriptive prefixes: `"DETECTED:"`, `"COMPLETED:"`
-- Avoid `console.log()` in production
+- Prefixes: `[GitSync]`, `[MCP Server]`, `[Stats]`, `DETECTED:`, `COMPLETED:`
 
-## BM25 Search Architecture
+### Git Auto-Commit (GITAUTOCOMMIT)
+- Enabled via `GITAUTOCOMMIT=true` env var
+- Auto-commits on every `saveGraph()` call
+- Commit message: `auto-commit:[operationContext] at [utc:YYYY-MM-DDTHH:mm:ss.SSSZ] [tz:Asia/Shanghai]`
+- Git author: `user.name: memfs-{version}`, `user.email: username-memfs@hostname`
+- Operation context tracked via `lastOperation` in KnowledgeGraphManager
 
-### Module Structure
-```
-src/tfidf/
-├── searchIntegrator.js       # Integration layer, routes to appropriate search
-├── hybridSearchService.js    # Core: tokenization → BM25 → Fuse.js → aggregate → fuse
-├── bm25Search.js           # BM25 搜索（纯 JavaScript 实现）
-├── fuseSearch.js             # Fuzzy search using Fuse.js
-└── traditionalSearch.js      # Legacy keyword matching (backward compat)
-```
+### Timestamp Format
+- **Storage**: `{utc: "ISO8601", timezone: "IANA"}` (e.g., "Asia/Shanghai")
+- **API response**: `"YYYY-MM-DD HH:mm:ss Timezone"` (local time with IANA zone)
 
-### Field Weights
-| Field | Weight | Rationale |
-|-------|--------|-----------|
-| name | 5.0 | Highest - entity identifier |
-| entityType | 4.0 | Category information |
-| definition | 4.0 | Detailed description |
-| observation | 3.0 | Supplementary info - enhanced for relevance |
+---
 
-### Search Configuration
-```javascript
-{
-    bm25Weight: 0.7,   // Primary ranking
-    fuzzyWeight: 0.3,   // Typo tolerance
-    limit: 15,          // Default result limit
-    minScore: 0.01      // Minimum relevance threshold
-}
-```
+## Environment Variables
 
-### Query Processing Flow
-1. **Tokenization**: Split by whitespace, filter < 2 chars, deduplicate
-2. **Multi-search**: Each token searched independently (BM25 + Fuse.js, topK=50)
-3. **Aggregation**: Merge results, deduplicate entities, track matched terms
-4. **Fusion**: Weighted score = (0.7×BM25 + 0.3×Fuse) × log₂(1 + matchedTerms)
-5. **Output**: Entities sorted by relevance, no scores exposed to LLM
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MEMORY_DIR` | Data storage directory | `~/.memory` |
+| `MEMORY_FILE_PATH` | **DEPRECATED** - use MEMORY_DIR | - |
+| `GITAUTOCOMMIT` | Enable git auto-commit | `false` |
 
-### Index Management
-- Index built lazily on first search request
-- Call `searchIntegrator.rebuildIndex()` after data modifications
-- Status available via `searchIntegrator.getStatus()`
+---
 
-## Design Patterns
-
-### Filesystem-Inspired Architecture
-| Filesystem Concept | Knowledge Graph Implementation |
-|-------------------|-------------------------------|
-| Inode Table | Centralized observation storage |
-| Hard Links | Multi-entity observation sharing |
-| Soft Links | Entity relations |
-| Copy-on-Write | Safe shared observation updates |
-| Orphan Detection | Garbage collection for unused observations |
-
-### Key Features
-1. **Observation Centralization**: Observations stored separately, referenced by ID
-2. **Copy-on-Write**: Updates to shared observations create new copies
-3. **Hybrid Search**: BM25 (0.7) + Fuse.js (0.3) with query tokenization
-4. **Backward Compat**: `basicFetch=true` for traditional keyword matching
-
-## Testing Guidelines
-
-### Test File Pattern
-- Use `.mjs` extension for ESM compatibility
-- Import from index.js: `import { KnowledgeGraphManager } from './index.js';`
-- Use simple assertion pattern
-- Include section headers for readability
-
-### Cache Strategy
-- 30-second TTL cache for `loadGraph()`
-- `_clearCache()` called after `saveGraph()`
-- Improves read performance significantly
-
-### Windows Compatibility
-- File locks not supported on Windows (EBUSY error)
-- Acceptable for MCP server (single-process usage)
-- Documented with humor in code comments
-
-## Publishing
-
-### Using publish-new Skill
-This project uses the `publish-new` skill for automated releases. To publish:
-
+## Publishing (use publish-new skill)
 ```bash
-# Trigger the skill by saying:
-# "使用 publish-new skill 发布新版本"
+# Say: "使用 publish-new skill 发布新版本"
 ```
 
-The skill will:
-1. Analyze git diff to determine version bump (feat→minor, fix→patch, BREAKING CHANGE→major)
-2. Update package.json version
-3. Commit to GitHub
-4. Publish to npm
+Version bump: feat→minor, fix→patch, BREAKING CHANGE→major
 
-### Manual Publishing
-```bash
-# Update version in package.json
-npm version patch  # or minor/major
+---
 
-# Publish to npm
-npm publish
+## Recent Changes (2026-03)
 
-# Push to GitHub
-git push origin master
-```
-
-### Version Rules
-| Change Type | Version Bump | npm Publish |
-|-------------|--------------|-------------|
-| feat | minor | ✅ Yes |
-| fix | patch | ✅ Yes |
-| BREAKING CHANGE | major | ✅ Yes |
-| docs/chore | none | ❌ GitHub only |
+- **Gram Tokenization**: Unified 2~(n-1) gram system replacing language-specific rules
+- **Gram Penalty**: 2-gram gets 50% penalty; longer grams use `1/e^(n-2)` decay
+- **2-gram False Positive Fix**: Apply 50% penalty to 2-gram tokens to reduce spurious matches (e.g., "CA" in "Technical" incorrectly matching "CA" in "CACG+")
+- **Field Weights**: Centralized in `DEFAULT_FIELD_WEIGHTS`
+- **DefinitionSource**: Added to index with weight 1.5
+- **Relation Boost**: Relation type matching query grams → 1.5x
+- **Limit Fix**: Total entities (direct + related) now respect `limit` parameter
