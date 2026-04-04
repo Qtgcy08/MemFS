@@ -46,6 +46,9 @@ node index.js
 
 # Or specify custom storage directory
 MEMORY_DIR=~/my-knowledge
+
+# Enable Git auto-sync (auto-commits on every save)
+GITAUTOCOMMIT=true node index.js
 ```
 
 ### Configure as MCP Server
@@ -75,6 +78,40 @@ MEMORY_DIR=~/my-knowledge
   }
 }
 ```
+
+---
+
+## 📰 What's New in 2.4.12
+
+### Git Auto-Commit
+
+New `GITAUTOCOMMIT=true` environment variable — every operation auto-commits to Git:
+
+```
+auto-sync: (createEntity "Weber") at UTC 2026-03-28T12:34:56.789Z
+```
+
+### searchNode Refactoring
+
+- Response simplified to `{ entities, observations, relations }`
+- Removed `searchMode` field
+- `observations` now includes `updatedAt`
+- Related entities count limited by `limit`
+- Unified tokenization: 2~(n-1) gram, no language detection
+- 2-gram penalty **×0.5**: short tokens no longer over-match
+- Field weights centralized in `DEFAULT_FIELD_WEIGHTS`
+- `definitionSource` added to search index
+- Relation type matching boost
+
+### Operation Return Refactoring
+
+- Write operation messages simplified (less LLM token consumption)
+- Delete operations return full data for potential undo
+- `deleteObservation` now uses ID-based input
+
+### Auxiliary Tools
+
+- New `getConsole` tool to retrieve buffered logs
 
 ---
 
@@ -172,6 +209,12 @@ flowchart TD
 | `getOrphanObservation` | Find orphan observations | Discover invalid data |
 | `recycleObservation` | Permanently delete observations | Clean up unused data |
 
+### Auxiliary
+
+| Tool | Function | Example |
+|------|----------|---------|
+| `getConsole` | Get console messages and Git commit logs | View auto-commit history |
+
 ---
 
 ## 🔍 Hybrid Search (searchNode)
@@ -208,9 +251,10 @@ await searchNode("sociology", {
 | Field | Weight | Description |
 |-------|--------|-------------|
 | name | 5.0 | Highest - entity name |
-| entityType | 4.0 | Entity type |
-| definition | 4.0 | Definition description |
-| observation | 3.0 | Observation content |
+| entityType | 2.5 | Entity type |
+| definition | 2.5 | Definition description |
+| definitionSource | 1.5 | Definition source |
+| observation | 1.0 | Observation content |
 
 ---
 
@@ -275,8 +319,10 @@ await updateNode({
 
 ```jsonl
 {"type":"entity","name":"Weber","entityType":"person","definition":"German sociologist","definitionSource":"Wikipedia","observationIds":[1,2]}
+{"type":"entity","name":"Durkheim","entityType":"person","definition":"French sociologist","definitionSource":"Wikipedia","observationIds":[3]}
 {"type":"observation","id":1,"content":"Author of 'The Protestant Ethic'","createdAt":{"utc":"2026-02-08T13:53:07Z","timezone":"Asia/Shanghai"}}
-{"type":"observation","id":2,"content":"Contemporary with Durkheim and Marx","createdAt":{"utc":"2026-02-08T14:00:00Z","timezone":"Asia/Shanghai"}}
+{"type":"observation","id":2,"content":"Contemporary with Durkheim and Marx","createdAt":{"utc":"2026-02-08T14:00:00Z","timezone":"Asia/Shanghai"},"updatedAt":{"utc":"2026-02-09T10:30:00Z","timezone":"Asia/Shanghai"}}
+{"type":"observation","id":3,"content":"Author of 'The Division of Labor in Society'","createdAt":{"utc":"2026-02-08T15:00:00Z","timezone":"Asia/Shanghai"}}
 {"type":"relation","from":"Weber","to":"Durkheim","relationType":"contemporary"}
 ```
 
@@ -287,19 +333,79 @@ await updateNode({
 | Default | `~/.memory/memory.jsonl` |
 | Custom directory | `MEMORY_DIR=/path/to/data` |
 
+### Environment Variables
+
+| Variable | Description | Default | Status |
+|----------|-------------|---------|--------|
+| `MEMORY_DIR` | Data storage directory | `~/.memory` | ✅ Recommended |
+| `MEMORY_FILE_PATH` | Full file path (deprecated) | `~/.memory/memory.jsonl` | ⚠️ Deprecated |
+| `GITAUTOCOMMIT` | Enable Git auto-commit on every save | `false` | ✅ Recommended |
+
+---
+
+## 🔄 Git Auto-Sync
+
+When enabled, every save to the memory file is automatically committed to Git for version control.
+
+```bash
+# Enable Git auto-commit
+GITAUTOCOMMIT=true node index.js
+
+# Or in MCP config
+{
+  "environment": {
+    "MEMORY_DIR": "/path/to/data",
+    "GITAUTOCOMMIT": "true"
+  }
+}
+```
+
+### Commit Format
+
+```
+auto-sync: (operation_type "details") at UTC YYYY-MM-DDTHH:mm:ss.SSSZ
+```
+
+Example:
+```
+auto-sync: (createEntity "Weber") at UTC 2026-03-22T09:15:30.123Z
+auto-sync: (updateNode "Durkheim") at UTC 2026-03-22T09:16:45.456Z
+auto-sync: (deleteRelation "Weber"→"Durkheim") at UTC 2026-03-22T09:17:00.789Z
+```
+
+### View Commit History
+
+Use `getConsole` tool:
+
+```javascript
+await getConsole()
+// Returns text content with buffered logs and Git commits prefixed by "[Git]"
+```
+
+---
+
+## 📦 Legacy Version
+
+The v1.3.0 code is available on the `legacy` branch:
+
+```bash
+git clone https://github.com/Qtgcy08/MemFS.git
+cd MemFS
+git checkout legacy
+```
+
+If you're using `MEMORY_FILE_PATH`, please migrate to `MEMORY_DIR` before upgrading.
+
 ---
 
 ## 🧪 Testing
 
 ```bash
-# Full test suite (45 tests)
-node test_full.mjs
+# Full test suite (22 tests)
+node test_mcp_full.mjs
 
-# Hybrid search tests (38 tests)
-node test_hybrid_search.mjs
-
-# Observation search tests
-node test_observation_search.mjs
+# Git Sync tests
+node test_gitsync.mjs
 ```
 
 ---

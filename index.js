@@ -6,10 +6,14 @@ import Fuse from 'fuse.js';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { homedir } from 'os';
+import { homedir, hostname, userInfo } from 'os';
+import { execSync, execFileSync } from 'child_process';
 
 // Import search modules
 import { SearchIntegrator } from './src/tfidf/searchIntegrator.js';
+
+// Global constants
+const VERSION = "2.4.12";
 
 // Get user home directory with fallback
 function getHomeDir() {
@@ -37,8 +41,13 @@ export async function ensureMemoryFilePath() {
             : path.join(getHomeDir(), process.env.MEMORY_DIR);
         return path.join(customDir, 'memory.jsonl');
     }
-    // Check for custom file path via MEMORY_FILE_PATH environment variable
+    // Check for custom file path via MEMORY_FILE_PATH environment variable (DEPRECATED)
     if (process.env.MEMORY_FILE_PATH) {
+        console.error('[Deprecation Warning] MEMORY_FILE_PATH is deprecated and will be removed in v2.0.');
+        console.error('[Deprecation Warning] Please migrate to MEMORY_DIR instead. Example:');
+        console.error('[Deprecation Warning]   1. Rename your memory file to memory.jsonl');
+        console.error('[Deprecation Warning]   2. Move it to a dedicated folder');
+        console.error('[Deprecation Warning]   3. Use: MEMORY_DIR=/path/to/folder node index.js');
         return path.isAbsolute(process.env.MEMORY_FILE_PATH)
             ? process.env.MEMORY_FILE_PATH
             : path.join(path.dirname(fileURLToPath(import.meta.url)), process.env.MEMORY_FILE_PATH);
@@ -67,6 +76,165 @@ export async function ensureMemoryFilePath() {
         return newMemoryPath;
     }
 }
+
+// Git Sync 功能 - 自动提交记忆文件到 git
+// Git Sync feature - auto-commit memory file to git
+const gitSync = {
+    enabled: false,
+    initialized: false,
+    memoryDir: null,
+    
+    // Check if git sync is enabled
+    isEnabled() {
+        if (this.enabled) return true;
+        const gitsync = process.env.GITAUTOCOMMIT;
+        this.enabled = (gitsync === 'true' || gitsync === '1' || gitsync?.toLowerCase() === 'yes');
+        return this.enabled;
+    },
+    
+    // Log to console buffer (for getConsole tool)
+    log(level, message) {
+        consoleBuffer.push(`[Git] ${message}`);
+        if (level === 'error') {
+            console.error(`[Git] ${message}`);
+        } else {
+            console.error(`[Git] ${message}`);
+        }
+    },
+    
+    // Execute git command
+    execGit(args, cwd) {
+        try {
+            // Use execFileSync instead of execSync to properly handle arguments with spaces
+            // execSync with string concatenation fails on Windows when args contain spaces
+            const result = execFileSync('git', args, { 
+                cwd, 
+                encoding: 'utf8',
+                stdio: ['pipe', 'pipe', 'pipe']
+            });
+            return { success: true, output: result || '' };
+        } catch (error) {
+            // execFileSync throws on non-zero exit, capture full error info
+            const exitCode = error.status !== undefined ? error.status : 'unknown';
+            const stderr = error.stderr ? error.stderr.toString() : '';
+            const message = error.message || 'Unknown error';
+            return { 
+                success: false, 
+                error: `[exit:${exitCode}] ${message}${stderr ? ' stderr: ' + stderr : ''}`,
+                exitCode,
+                stderr
+            };
+        }
+    },
+    
+    // Check if git is installed
+    async isGitInstalled() {
+        const result = await this.execGit(['--version']);
+        return result.success;
+    },
+    
+    // Check if directory is a git repo (not just inside one)
+    async isGitRepo(dir) {
+        // Check if .git exists specifically in this directory
+        const gitDir = path.join(dir, '.git');
+        try {
+            const stat = await fs.stat(gitDir);
+            return stat.isDirectory();
+        } catch {
+            // .git doesn't exist in this directory
+            return false;
+        }
+    },
+    
+    // Initialize git repo in memory directory
+    async initRepo(dir) {
+        if (this.initialized) return true;
+        
+        this.memoryDir = dir;
+        
+        // Check if git is installed
+        if (!await this.isGitInstalled()) {
+            this.log('warn', 'Git not installed, git sync disabled');
+            return false;
+        }
+        
+        // Check if already a git repo
+        if (await this.isGitRepo(dir)) {
+            this.log('info', 'Git repo already exists at ' + dir);
+        } else {
+            // Initialize new git repo
+            const result = await this.execGit(['init'], dir);
+            if (!result.success) {
+                this.log('error', 'Failed to initialize git repo: ' + result.error);
+                return false;
+            }
+            this.log('info', 'Initialized new git repo at ' + dir);
+        }
+        
+        // Configure user (required for commits) - always set even if repo already exists
+        // Format: author:"memfs-(version)", email:"username-memfs@hostname"
+        const username = userInfo().username;
+        const hostnameStr = hostname();
+        await this.execGit(['config', 'user.email', `${username}-memfs@${hostnameStr}`], dir);
+        await this.execGit(['config', 'user.name', `memfs-${VERSION}`], dir);
+        
+        this.initialized = true;
+        return true;
+    },
+    
+    // Auto-commit memory file changes
+    async autoCommit(memoryFilePath, operationContext = null) {
+        try {
+            console.error('[Git] autoCommit called, enabled:', this.enabled, 'initialized:', this.initialized);
+            if (!this.isEnabled()) return;
+            if (!this.initialized) return;
+            
+            const dir = this.memoryDir;
+            const fileName = path.basename(memoryFilePath);
+            
+            // Check if file exists
+            try {
+                await fs.access(memoryFilePath);
+            } catch {
+                console.error('[Git] File does not exist yet');
+                return; // File doesn't exist yet
+            }
+            
+            // git add
+            const addResult = this.execGit(['add', fileName], dir);
+            console.error('[Git] git add result:', addResult.success, addResult.output || addResult.error);
+            if (!addResult.success) {
+                this.log('warn', 'Failed to git add: ' + addResult.error);
+                return;
+            }
+            
+            // Check if there are changes to commit
+            const statusResult = this.execGit(['status', '--porcelain'], dir);
+            console.error('[Git] git status result:', statusResult.success, 'output:', statusResult.output);
+            if (!statusResult.success || !statusResult.output.trim()) {
+                console.error('[Git] No changes to commit');
+                return; // No changes to commit
+            }
+            
+            // git commit with timestamp and operation context
+            // Format: auto-commit:[operationContext] at [utc:YYYY-MM-DDTHH:mm:ss.SSSZ] [tz:Asia/Shanghai]
+            const timestamp = new Date().toISOString(); // ISO 8601 UTC format
+            const tz = getSystemTimezone();
+            const opInfo = operationContext ? `${operationContext}` : '';
+            const commitMsg = `auto-commit:[${opInfo}] at [utc:${timestamp}] [tz:${tz}]`;
+            
+            const commitResult = this.execGit(['commit', '-m', commitMsg], dir);
+            if (commitResult.success) {
+                this.log('info', `Auto-committed: ${commitMsg}`);
+            } else {
+                this.log('warn', 'Failed to commit: ' + commitResult.error);
+            }
+        } catch (e) {
+            console.error('[Git] autoCommit exception:', e.message, e.stack);
+        }
+    }
+};
+
 // Initialize memory file path (will be set during startup)
 let MEMORY_FILE_PATH;
 // Helper function to format observations - conditionally include createdAt
@@ -288,18 +456,42 @@ function formatObservationTimestamp(data) {
     return { createdAt: null, updatedAt: null };
 }
 
+// Helper to get latest timestamp from observations
+function getLatestTimestamp(observations) {
+    let latest = null;
+    for (const obs of observations) {
+        const ts = obs.updatedAt || obs.createdAt;
+        if (ts && ts.utc) {
+            if (!latest || ts.utc > latest) {
+                latest = ts.utc;
+            }
+        }
+    }
+    return latest;
+}
+
 // The KnowledgeGraphManager class contains all operations to interact with the knowledge graph
 export class KnowledgeGraphManager {
     memoryFilePath;
     cache;
     fileLock;
     searchIntegrator;  // Reference to searchIntegrator for index rebuild on data changes
+    lastOperation;     // Track last operation for git commit message
     constructor(memoryFilePath, searchIntegrator = null) {
         this.memoryFilePath = memoryFilePath;
         this.cache = null;  // Simple memory cache: { data, mtime, timestamp }
         this.fileLock = null;  // File lock state
         this.isWindows = process.platform === 'win32';
         this.searchIntegrator = searchIntegrator;
+        this.lastOperation = null;
+    }
+
+    // Set operation context for git commit message (auto-truncated)
+    _setOperation(opType, ...details) {
+        const detail = details.length > 0 ? ' ' + details.map(d => `"${d}"`).join(', ') : '';
+        // Truncate to 50 chars max for commit message
+        const full = `${opType}${detail}`;
+        this.lastOperation = full.length > 50 ? full.substring(0, 47) + '...' : full;
     }
     
     // Clear cache
@@ -423,6 +615,7 @@ export class KnowledgeGraphManager {
                 });
                 
                 // Return the migrated graph
+                const migratedObservationsList = rawObservations.concat(migratedObservations);
                 const migratedResult = {
                     entities: rawEntities.map(e => ({
                         name: e.name,
@@ -431,15 +624,22 @@ export class KnowledgeGraphManager {
                         definitionSource: e.definitionSource === undefined || e.definitionSource === null ? null : String(e.definitionSource),
                         observationIds: e.observationIds || []
                     })),
-                    observations: rawObservations.concat(migratedObservations),
+                    observations: migratedObservationsList,
                     definitions: rawDefinitions,
-                    relations: rawRelations
+                    relations: rawRelations,
+                    _lastModified: getLatestTimestamp(migratedObservationsList)
                 };
                 this._updateCache(migratedResult);
                 return migratedResult;
             }
             
             // New format: entities store observationIds (array of numbers)
+            const newFormatObservations = rawObservations.map(o => ({
+                id: o.id,
+                content: o.content,
+                createdAt: parseTimestampToStorage(o.createdAt),
+                updatedAt: parseTimestampToStorage(o.updatedAt)
+            }));
             const newFormatResult = {
                 entities: rawEntities.map(e => ({
                     name: e.name,
@@ -448,11 +648,7 @@ export class KnowledgeGraphManager {
                     definitionSource: e.definitionSource === undefined || e.definitionSource === null ? null : String(e.definitionSource),
                     observationIds: e.observationIds || []
                 })),
-                observations: rawObservations.map(o => ({
-                    id: o.id,
-                    content: o.content,
-                    createdAt: parseTimestampToStorage(o.createdAt)
-                })),
+                observations: newFormatObservations,
                 definitions: rawDefinitions.map(d => ({
                     entityName: d.entityName,
                     content: d.content,
@@ -464,7 +660,8 @@ export class KnowledgeGraphManager {
                     from: r.from,
                     to: r.to,
                     relationType: r.relationType
-                }))
+                })),
+                _lastModified: getLatestTimestamp(newFormatObservations)
             };
             this._updateCache(newFormatResult);
             return newFormatResult;
@@ -505,7 +702,8 @@ export class KnowledgeGraphManager {
                     type: "observation",
                     id: o.id,
                     content: o.content,
-                    createdAt: o.createdAt || null
+                    createdAt: o.createdAt || null,
+                    updatedAt: o.updatedAt || null
                 })),
                 ...graph.definitions.map(d => JSON.stringify({
                     type: "definition",
@@ -531,10 +729,15 @@ export class KnowledgeGraphManager {
         // Clear cache since file was modified
         this._clearCache();
         
-        // Rebuild search index to ensure new data is searchable immediately
+        // Rebuild search index in background (non-blocking)
         if (this.searchIntegrator) {
-            await this.searchIntegrator.rebuildIndex();
+            this.searchIntegrator.rebuildIndex();
         }
+        
+        // Auto-commit to git if enabled
+        console.error('[Git] About to call autoCommit');
+        await gitSync.autoCommit(this.memoryFilePath, this.lastOperation);
+        console.error('[Git] autoCommit returned');
     }
     async createEntity(entities) {
         const graph = await this.loadGraph();
@@ -592,16 +795,20 @@ export class KnowledgeGraphManager {
             });
         }
         
+        // Set operation context for git commit
+        const newNames = newEntities.map(e => e.name);
+        this._setOperation('createEntity', ...newNames);
+        
         await this.saveGraph(graph);
         
         // Build result message
         const created = newEntities.length;
         const skipped = skippedEntities.length;
         
-        let message = `Created ${created} entity(ies)`;
+        const createdNames = newEntities.map(e => e.name).join(', ');
+        let message = `Created ${created} entities: ${createdNames}`;
         if (skipped > 0) {
-            const skippedList = skippedEntities.map(name => `实体"${name}"已存在，使用updateNode更新该实体`).join('; ');
-            message += `, skipped ${skipped} duplicate(s): ${skippedList}`;
+            message += `; Skipped duplicates: ${skippedEntities.join(', ')}`;
         }
         
         return {
@@ -616,6 +823,11 @@ export class KnowledgeGraphManager {
             existingRelation.to === r.to &&
             existingRelation.relationType === r.relationType));
         graph.relations.push(...newRelations);
+        
+        // Set operation context for git commit
+        const relDescs = newRelations.map(r => `${r.relationType}: ${r.from}→${r.to}`);
+        this._setOperation('createRelation', ...relDescs);
+        
         await this.saveGraph(graph);
         return newRelations;
     }
@@ -661,37 +873,54 @@ export class KnowledgeGraphManager {
             
             results.push({
                 entityName: o.entityName,
-                addedObservations: o.contents
+                addedObservations: o.contents,
+                addedObservationIds: entity.observationIds.slice(-o.contents.length)  // Last N IDs added
             });
         }
+        
+        // Set operation context for git commit
+        this._setOperation('addObservation', ...results.map(r => r.entityName));
         
         await this.saveGraph(graph);
         return results;
     }
     async deleteEntity(entityNames) {
         const graph = await this.loadGraph();
+        
+        // Capture deleted entities and relations for potential undo
+        const deletedEntities = graph.entities.filter(e => entityNames.includes(e.name));
+        const deletedRelations = graph.relations.filter(r => entityNames.includes(r.from) || entityNames.includes(r.to));
+        
         graph.entities = graph.entities.filter(e => !entityNames.includes(e.name));
         graph.relations = graph.relations.filter(r => !entityNames.includes(r.from) && !entityNames.includes(r.to));
+        
+        // Set operation context for git commit
+        this._setOperation('deleteEntity', ...entityNames);
+        
         await this.saveGraph(graph);
+        
+        return {
+            deletedEntities,
+            deletedRelations
+        };
     }
-    async deleteObservation(observations) {
+    async deleteObservation(observationIds, entityNames) {
         const graph = await this.loadGraph();
         const warnings = [];
         const results = [];
         
-        for (const item of observations) {
-            const observation = item.observation;
-            const entityNames = item.entityNames || [];
-            
-            const obs = graph.observations.find(o => o.content === observation);
+        const obsIds = Array.isArray(observationIds) ? observationIds : [observationIds];
+        const entNames = Array.isArray(entityNames) ? entityNames : (entityNames ? [entityNames] : []);
+        
+        for (const obsId of obsIds) {
+            const obs = graph.observations.find(o => o.id === obsId);
             
             if (!obs) {
-                warnings.push(`Observation "${observation}" not found`);
+                warnings.push(`Observation ID ${obsId} not found`);
                 results.push({
-                    observation: observation,
-                    observationId: null,
+                    observationId: obsId,
                     removedFrom: [],
-                    notFoundEntities: entityNames,
+                    notFoundEntities: entNames,
                     message: "Observation not found"
                 });
                 continue;
@@ -700,7 +929,7 @@ export class KnowledgeGraphManager {
             const removedFrom = [];
             const notFoundEntities = [];
             
-            for (const entityName of entityNames) {
+            for (const entityName of entNames) {
                 const entity = graph.entities.find(e => e.name === entityName);
                 
                 if (!entity) {
@@ -709,7 +938,7 @@ export class KnowledgeGraphManager {
                 }
                 
                 if (!entity.observationIds.includes(obs.id)) {
-                    warnings.push(`Observation "${observation}" not linked to entity "${entityName}"`);
+                    warnings.push(`Observation ID ${obsId} not linked to entity "${entityName}"`);
                     continue;
                 }
                 
@@ -719,16 +948,27 @@ export class KnowledgeGraphManager {
             }
             
             results.push({
-                observation: observation,
                 observationId: obs.id,
+                originalContent: obs.content,
                 removedFrom: removedFrom,
-                notFoundEntities: notFoundEntities
+                notFoundEntities: notFoundEntities,
+                // Full observation data for potential undo
+                observationData: {
+                    id: obs.id,
+                    content: obs.content,
+                    createdAt: obs.createdAt,
+                    updatedAt: obs.updatedAt
+                }
             });
             
             if (notFoundEntities.length > 0) {
-                warnings.push(`Entities not found for "${observation}": ${notFoundEntities.join(', ')}`);
+                warnings.push(`Entities not found for observation ID ${obsId}: ${notFoundEntities.join(', ')}`);
             }
         }
+        
+        // Set operation context for git commit
+        const opDetails = obsIds.map(id => `obs#${id}`);
+        this._setOperation('deleteObservation', ...opDetails);
         
         await this.saveGraph(graph);
         
@@ -743,6 +983,11 @@ export class KnowledgeGraphManager {
         graph.relations = graph.relations.filter(r => !relations.some(delRelation => r.from === delRelation.from &&
             r.to === delRelation.to &&
             r.relationType === delRelation.relationType));
+        
+        // Set operation context for git commit
+        const relDescs = relations.map(r => `${r.from}→${r.to}`);
+        this._setOperation('deleteRelation', ...relDescs);
+        
         await this.saveGraph(graph);
     }
     async recycleObservation(observationIds, force = false) {
@@ -806,6 +1051,9 @@ export class KnowledgeGraphManager {
             }
         }
 
+        // Set operation context for git commit
+        this._setOperation('recycleObservation', `deleted:${deleted.length},skipped:${skipped.length}`);
+
         await this.saveGraph(graph);
 
         return {
@@ -839,6 +1087,10 @@ export class KnowledgeGraphManager {
             // Create new definition
             graph.definitions.push(definition);
         }
+        
+        // Set operation context for git commit
+        this._setOperation('setDefinition', entityName);
+        
         await this.saveGraph(graph);
     }
     async updateNode(updates) {
@@ -939,6 +1191,10 @@ export class KnowledgeGraphManager {
             });
         }
         
+        // Set operation context for git commit
+        const updatedNames = updates.map(u => u.entityName);
+        this._setOperation('updateNode', ...updatedNames);
+        
         await this.saveGraph(graph);
         return results;
     }
@@ -970,11 +1226,16 @@ export class KnowledgeGraphManager {
         
         // Update the observation content - all linked entities will see this change
         observation.content = newContent;
+        observation.updatedAt = getCurrentTimestamp();  // Track when observation was updated
         
         // Find all entities that reference this observation
         const linkedEntities = graph.entities
             .filter(e => e.observationIds?.includes(observationId))
             .map(e => e.name);
+        
+        // Set operation context for git commit
+        const contentPreview = newContent.length > 20 ? newContent.substring(0, 17) + '...' : newContent;
+        this._setOperation('updateObservation', String(observationId), contentPreview);
         
         await this.saveGraph(graph);
         
@@ -1244,7 +1505,7 @@ const EntitySchema = z.object({
     name: z.string().describe("The name of the entity"),
     entityType: z.string().describe("The type of the entity"),
     definition: z.string().describe("The definition of the entity"),
-    definitionSource: z.string().optional().describe("Source or reference for the definition"),
+    definitionSource: z.string().optional().describe("Source of the definition - prefer URL, filename, or book title"),
     observations: z.array(z.string()).optional().default([]).describe("Observation contents")
 });
 const EntityOutputSchema = z.object({
@@ -1274,12 +1535,64 @@ const ObservationSchema = z.object({
 // The server instance and tools exposed to Claude
 const server = new McpServer({
     name: "MemFS",
-    version: "1.21.1",
+    version: VERSION,
+});
+// Console buffer for getConsole tool (with deduplication)
+const consoleBuffer = [];
+const seenMessages = new Set();
+// Override console.error to capture messages
+const originalConsoleError = console.error;
+console.error = (...args) => {
+    const message = args.join(' ').trim();
+    if (!seenMessages.has(message)) {
+        seenMessages.add(message);
+        consoleBuffer.push(message);
+    }
+    originalConsoleError.apply(console, args);
+};
+// Register getConsole tool
+server.registerTool("getConsole", {
+    title: "Get Console",
+    description: "Retrieve buffered server logs and recent git commits.",
+    inputSchema: {
+        easterEgg: z.boolean().optional().default(false).describe("Easter egg activated")
+    },
+    outputSchema: {}
+}, async ({ easterEgg }) => {
+    const lines = [];
+    
+    // Add buffered messages
+    for (const msg of consoleBuffer) {
+        lines.push(msg);
+    }
+    
+    // Get recent git log if git sync is enabled and initialized
+    if (gitSync.isEnabled() && gitSync.initialized) {
+        // Format: %h %an <%ae> %s (short hash, author name, email, subject)
+        const logResult = await gitSync.execGit(['log', '--format=%h %an <%ae> %s', '-10'], gitSync.memoryDir);
+        if (logResult.success) {
+            const commits = logResult.output.trim().split('\n');
+            for (const commit of commits) {
+                lines.push(`[Git] ${commit}`);
+            }
+        }
+    }
+    
+    // Easter egg for 乐正绫's 11th birthday
+    if (easterEgg) {
+        lines.push('');
+        lines.push('🎉 "乐正司百曲，绫动万年红" —— 阿绫11周年生日快乐！');
+    }
+    
+    return {
+        content: [{ type: "text", text: lines.join('\n') }],
+        structuredContent: {}
+    };
 });
 // Register create_entities tool
 server.registerTool("createEntity", {
     title: "Create Entity",
-    description: "Multi create entities with definitions. Each requires name, type and definition. Skips duplicates and提醒使用updateNode更新.",
+    description: "Create multiple entities with names, types, and definitions. Skips duplicate entities - use updateNode to modify existing ones.",
     inputSchema: {
         entities: z.array(EntitySchema)
     },
@@ -1300,7 +1613,7 @@ server.registerTool("createEntity", {
 // Register create_relations tool
 server.registerTool("createRelation", {
     title: "Create Relation",
-    description: "Multi create relations between entities. Use active voice for relation types.",
+    description: "Create multiple relations between entities. Use active voice for relation types (e.g., 'includes', 'relates to', 'follows').",
     inputSchema: {
         relations: z.array(RelationSchema)
     },
@@ -1310,14 +1623,14 @@ server.registerTool("createRelation", {
 }, async ({ relations }) => {
     const result = await knowledgeGraphManager.createRelation(relations);
     return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        content: [{ type: "text", text: `Created ${result.length} relations` }],
         structuredContent: { relations: result }
     };
 });
 // Register add_observations tool
 server.registerTool("addObservation", {
     title: "Add Observation",
-    description: "Multi add observations to entities. Supports batch operations across entities.",
+    description: "Add observations to multiple entities. Supports batch operations across different entities.",
     inputSchema: {
         observations: z.array(z.object({
             entityName: z.string().describe("The name of the entity to add the observations to"),
@@ -1327,68 +1640,94 @@ server.registerTool("addObservation", {
     outputSchema: {
         results: z.array(z.object({
             entityName: z.string(),
-            addedObservations: z.array(z.string())
+            addedObservations: z.array(z.string()),
+            addedObservationIds: z.array(z.number()).optional()
         }))
     }
 }, async ({ observations }) => {
     const result = await knowledgeGraphManager.addObservation(observations);
+    const allNewIds = result.flatMap(r => r.addedObservationIds || []);
     return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        content: [{ type: "text", text: `Added observations to ${result.length} entities, new obs IDs: [${allNewIds.join(', ')}]` }],
         structuredContent: { results: result }
     };
 });
 // Register delete_entities tool
 server.registerTool("deleteEntity", {
     title: "Delete Entity",
-    description: "Multi delete entities and their associated relations.",
+    description: "Delete multiple entities and all their associated relations. Returns full entity JSON for potential undo.",
     inputSchema: {
         entityNames: z.array(z.string()).describe("An array of entity names to delete")
     },
     outputSchema: {
         success: z.boolean(),
-        message: z.string()
+        message: z.string(),
+        deletedEntities: z.array(z.object({
+            name: z.string(),
+            entityType: z.string(),
+            definition: z.string(),
+            definitionSource: z.string().nullable().optional(),
+            observationIds: z.array(z.number())
+        })),
+        deletedRelations: z.array(z.object({
+            from: z.string(),
+            to: z.string(),
+            relationType: z.string()
+        }))
     }
 }, async ({ entityNames }) => {
-    await knowledgeGraphManager.deleteEntity(entityNames);
+    const result = await knowledgeGraphManager.deleteEntity(entityNames);
+    const names = result.deletedEntities.map(e => e.name).join(', ');
     return {
-        content: [{ type: "text", text: "Entities deleted successfully" }],
-        structuredContent: { success: true, message: "Entities deleted successfully" }
+        content: [{ type: "text", text: `Deleted entities: ${names}` }],
+        structuredContent: { 
+            success: true, 
+            message: `Deleted entities: ${names}`,
+            deletedEntities: result.deletedEntities,
+            deletedRelations: result.deletedRelations
+        }
     };
 });
 // Register delete_observations tool
 server.registerTool("deleteObservation", {
     title: "Delete Observation",
-    description: "Remove observation links from entities. Observation stays as orphan. Per-observation batch operation.",
+    description: "Remove observation links from entities by observation ID. Returns full observation content for potential undo.",
     inputSchema: {
-        observations: z.array(z.object({
-            observation: z.string().describe("The observation content to unlink"),
-            entityNames: z.array(z.string()).describe("Entity names to unlink from this observation")
-        }))
+        observationIds: z.array(z.number()).describe("Observation IDs to unlink"),
+        entityNames: z.array(z.string()).describe("Entity names to unlink from (omit to unlink from all)")
     },
     outputSchema: {
         success: z.boolean(),
         warnings: z.array(z.string()),
         results: z.array(z.object({
-            observation: z.string(),
             observationId: z.number(),
+            originalContent: z.string(),
             removedFrom: z.array(z.string()),
-            notFoundEntities: z.array(z.string())
+            notFoundEntities: z.array(z.string()),
+            observationData: z.object({
+                id: z.number(),
+                content: z.string(),
+                createdAt: z.any(),
+                updatedAt: z.any()
+            })
         }))
     }
-}, async ({ observations }) => {
-    const result = await knowledgeGraphManager.deleteObservation(observations);
+}, async ({ observationIds, entityNames }) => {
+    const result = await knowledgeGraphManager.deleteObservation(observationIds, entityNames);
+    const unlinkedIds = result.results.filter(r => r.observationId).map(r => r.observationId);
+    const contents = result.results.filter(r => r.originalContent).map(r => `"${r.originalContent.substring(0, 20)}..."`);
     const warningText = result.warnings.length > 0 
         ? `Warnings: ${result.warnings.join('; ')}` 
         : "";
     return {
-        content: [{ type: "text", text: `Observations unlinked. ${warningText}` }],
+        content: [{ type: "text", text: `Unlinked observations: [${unlinkedIds.join(', ')}]${warningText ? ' ' + warningText : ''}` }],
         structuredContent: result
     };
 });
 // Register delete_relations tool
 server.registerTool("deleteRelation", {
     title: "Delete Relation",
-    description: "Multi delete relations from the knowledge graph.",
+    description: "Delete multiple relations from the knowledge graph.",
     inputSchema: {
         relations: z.array(RelationSchema).describe("An array of relations to delete")
     },
@@ -1399,14 +1738,14 @@ server.registerTool("deleteRelation", {
 }, async ({ relations }) => {
     await knowledgeGraphManager.deleteRelation(relations);
     return {
-        content: [{ type: "text", text: "Relations deleted successfully" }],
-        structuredContent: { success: true, message: "Relations deleted successfully" }
+        content: [{ type: "text", text: `Deleted ${relations.length} relations` }],
+        structuredContent: { success: true, message: `Deleted ${relations.length} relations` }
     };
 });
 // Register recycle_observation tool
 server.registerTool("recycleObservation", {
     title: "Recycle Observation",
-    description: "Batch permanently delete observations. If orphan, delete directly. If referenced, skip unless force=true (removes from entities and deletes).",
+    description: "Permanently delete observations. Orphaned observations are deleted directly. Referenced observations are skipped unless force=true. Returns original content for potential undo.",
     inputSchema: {
         observationIds: z.array(z.number()).describe("Array of observation IDs to permanently delete"),
         force: z.boolean().optional().default(false).describe("Force delete even if observation is still referenced by entities")
@@ -1442,7 +1781,7 @@ server.registerTool("recycleObservation", {
 // Register read_graph tool
 server.registerTool("listGraph", {
     title: "List Graph",
-    description: "Read the entire knowledge graph. Use sparingly as it returns all data. Set time=true to include observation timestamps.",
+    description: "Read the entire knowledge graph with all entities, observations, and relations. Use sparingly as it returns all data. Set time=true to include timestamps.",
     inputSchema: {
         time: z.boolean().optional().default(false).describe("Include observation timestamps (createdAt)")
     },
@@ -1482,7 +1821,7 @@ server.registerTool("listGraph", {
 // Register search_nodes tool
 server.registerTool("searchNode", {
     title: "Search Node",
-    description: "Search entities using TF-IDF + Fuse.js hybrid search. Returns entities sorted by relevance score. Use basicFetch=true for traditional keyword matching.",
+    description: "Search entities using BM25 + Fuse.js hybrid search with relevance scoring. Returns sorted results with related entities and observations. Use basicFetch=true for traditional keyword matching.",
     inputSchema: {
         query: z.string().describe("The search query to match against entity names, types, definitions, and observation content"),
         time: z.boolean().optional().default(false).describe("Include observation timestamps (createdAt)"),
@@ -1492,7 +1831,7 @@ server.registerTool("searchNode", {
         totalMultiplier: z.number().optional().default(3).describe("Total output limit multiplier: limit × maxObservationsPerEntity × totalMultiplier (default: 3)"),
         bm25Weight: z.number().optional().default(0.7).describe("Weight for BM25 ranking (0-1, default: 0.7)"),
         fuzzyWeight: z.number().optional().default(0.3).describe("Weight for Fuse.js fuzzy matching (0-1, default: 0.3)"),
-        minScore: z.number().optional().default(0.01).describe("Minimum relevance score threshold (default: 0.01)")
+        minScore: z.number().optional().default(0.1).describe("Minimum relevance score threshold (default: 0.1)")
     },
     outputSchema: {
         entities: z.array(SearchNodeEntitySchema),
@@ -1504,9 +1843,9 @@ server.registerTool("searchNode", {
         observations: z.array(z.object({
             id: z.number(),
             content: z.string(),
-            createdAt: z.string().nullable()
-        })),
-        searchMode: z.enum(['traditional', 'hybrid'])
+            createdAt: z.string().nullable(),
+            updatedAt: z.string().nullable()
+        }))
     }
 }, async ({ query, time, basicFetch, limit, maxObservationsPerEntity, totalMultiplier, bm25Weight, fuzzyWeight, minScore }) => {
     const result = await searchIntegrator.searchNode(query, {
@@ -1521,21 +1860,14 @@ server.registerTool("searchNode", {
     // _meta 为内部调试信息，不返回给 LLM
     const { _meta, ...cleanResult } = result;
 
-    // 确保总输出数限制 (entities + observations + relations)
-    // 总输出 = limit × maxObservationsPerEntity × totalMultiplier
-    const totalLimit = maxObservationsPerEntity * limit * totalMultiplier;
-    const totalOutput = [
-        ...cleanResult.entities.map(e => ({ ...e, _type: 'entity' })),
-        ...cleanResult.observations.map(o => ({ ...o, _type: 'observation' })),
-        ...cleanResult.relations.map(r => ({ ...r, _type: 'relation' }))
-    ].slice(0, totalLimit);
-
-    // 拆分回原结构
+    // 直接使用 searchIntegrator 返回的结果，已经包含正确的限制
+    // - entities: 最多 limit 个
+    // - observations: 最多 limit × maxObservationsPerEntity 个
+    // - relations: 最多 limit × 2 个
     const limitedResult = {
-        entities: totalOutput.filter(i => i._type === 'entity').map(({ _type, ...e }) => e),
-        observations: totalOutput.filter(i => i._type === 'observation').map(({ _type, ...o }) => o),
-        relations: totalOutput.filter(i => i._type === 'relation').map(({ _type, ...r }) => r),
-        searchMode: cleanResult.searchMode
+        entities: cleanResult.entities,
+        observations: cleanResult.observations,
+        relations: cleanResult.relations
     };
 
     return {
@@ -1546,7 +1878,7 @@ server.registerTool("searchNode", {
 // Register open_nodes tool
 server.registerTool("readNode", {
     title: "Read Node",
-    description: "Open entities with observations and relations. Includes inline to-entity details. Set time=true to include observation timestamps.",
+    description: "Get detailed entity information including observations and relations. Includes inline target entity details. Set time=true to include timestamps.",
     inputSchema: {
         names: z.array(z.string()).describe("An array of entity names to retrieve"),
         time: z.boolean().optional().default(false).describe("Include observation timestamps (createdAt)")
@@ -1583,7 +1915,7 @@ server.registerTool("readNode", {
 // Register updateNode tool
 server.registerTool("updateNode", {
     title: "Update Node",
-    description: "Multi update entities and observations. Observations use copy-on-write when shared.",
+    description: "Update multiple entities and their observations. Shared observations use copy-on-write to preserve other entity references.",
     inputSchema: {
         updates: z.array(z.object({
             entityName: z.string().describe("The name of the entity to update"),
@@ -1610,15 +1942,16 @@ server.registerTool("updateNode", {
     }
 }, async ({ updates }) => {
     const results = await knowledgeGraphManager.updateNode(updates);
+    const updatedNames = results.map(r => r.entityName).join(', ');
     return {
-        content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
+        content: [{ type: "text", text: `Updated ${results.length} entities: ${updatedNames}` }],
         structuredContent: { results }
     };
 });
 // Register orphan_observations tool
 server.registerTool("getOrphanObservation", {
     title: "Get Orphan Observation",
-    description: "Find observations not referenced by any entity. Safe to delete. Set time=true to include timestamps.",
+    description: "Find observations not referenced by any entity. These are safe to permanently delete with recycleObservation.",
     inputSchema: {
         time: z.boolean().optional().default(false).describe("Include observation timestamps (createdAt)")
     },
@@ -1640,7 +1973,7 @@ server.registerTool("getOrphanObservation", {
 // Register read_observations tool
 server.registerTool("readObservation", {
     title: "Read Observation",
-    description: "Read observations by IDs. Returns observation details including content and timestamp.",
+    description: "Get observation details by IDs. Returns content and timestamp.",
     inputSchema: {
         ids: z.array(z.number()).describe("Array of observation IDs to retrieve"),
         time: z.boolean().optional().default(false).describe("Include observation timestamps (createdAt)")
@@ -1670,7 +2003,7 @@ server.registerTool("readObservation", {
 // Register update_observations tool (batch)
 server.registerTool("updateObservation", {
     title: "Update Observation",
-    description: "Multi update observations by ID. Changes propagate to all linked entities (linked mechanism). Copy-on-write is only available via updateNode.",
+    description: "Batch update observations by ID. Changes propagate to all linked entities. For copy-on-write behavior, use updateNode instead.",
     inputSchema: {
         updates: z.array(z.object({
             observationId: z.number().describe("The ID of the observation to update"),
@@ -1706,15 +2039,16 @@ server.registerTool("updateObservation", {
         return base;
     });
     
+    const updatedIds = formattedResults.map(r => r.observationId).join(', ');
     return {
-        content: [{ type: "text", text: JSON.stringify(formattedResults, null, 2) }],
+        content: [{ type: "text", text: `Updated observations: [${updatedIds}]` }],
         structuredContent: { results: formattedResults }
     };
 });
 // Register read_nodes tool
 server.registerTool("listNode", {
     title: "List Node",
-    description: "List all entity names, types and definitions. Use readNode for detailed observations and relations.",
+    description: "List all entity names, types, and definitions. Use readNode for detailed observations and relations.",
     inputSchema: {},
     outputSchema: {
         nodes: z.array(z.object({
@@ -1727,14 +2061,14 @@ server.registerTool("listNode", {
 }, async () => {
     const nodes = await knowledgeGraphManager.listNode();
     return {
-        content: [{ type: "text", text: JSON.stringify(nodes, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify(nodes) }],
         structuredContent: { nodes }
     };
 });
 // Register howWork tool
 server.registerTool("howWork", {
     title: "How It Works",
-    description: "Get the recommended workflow for using memory knowledge graph.",
+    description: "Get the recommended workflow for using the knowledge graph system.",
     inputSchema: {},
     outputSchema: {
         workflow: z.string()
@@ -1766,28 +2100,64 @@ server.registerTool("howWork", {
         structuredContent: { workflow }
     };
 });
-async function main() {
-    // Initialize memory file path with backward compatibility
-    MEMORY_FILE_PATH = await ensureMemoryFilePath();
+/**
+ * Create and initialize managers (for programmatic use / visualizer)
+ * Returns { knowledgeGraphManager, searchIntegrator }
+ */
+export async function createManagers(options = {}) {
+    const memoryPath = options.memoryPath || await ensureMemoryFilePath();
+    
     // Ensure the memory directory exists
-    const memoryDir = path.dirname(MEMORY_FILE_PATH);
+    const memoryDir = path.dirname(memoryPath);
     try {
         await fs.mkdir(memoryDir, { recursive: true });
     } catch (err) {
-        // Ignore errors if directory already exists or permission issues
         if (err.code !== 'EEXIST' && err.code !== 'EPERM') {
             throw err;
         }
     }
-    // Initialize knowledge graph manager first (without searchIntegrator reference yet)
-    knowledgeGraphManager = new KnowledgeGraphManager(MEMORY_FILE_PATH);
-    // Initialize search integrator for TF-IDF + Fuse.js hybrid search
-    searchIntegrator = new SearchIntegrator(knowledgeGraphManager);
-    // Now inject searchIntegrator reference back to knowledgeGraphManager
+    
+    // Initialize git sync if enabled
+    if (gitSync.isEnabled()) {
+        await gitSync.initRepo(memoryDir);
+    }
+    
+    const knowledgeGraphManager = new KnowledgeGraphManager(memoryPath);
+    const searchIntegrator = new SearchIntegrator(knowledgeGraphManager);
     knowledgeGraphManager.searchIntegrator = searchIntegrator;
+    
+    return { knowledgeGraphManager, searchIntegrator };
+}
+
+async function main() {
+    // Initialize managers
+    const { knowledgeGraphManager: manager, searchIntegrator: si } = await createManagers();
+    knowledgeGraphManager = manager;
+    searchIntegrator = si;
+    
+    // Load graph first for stats display
+    const graph = await knowledgeGraphManager.loadGraph();
+    const entityCount = graph.entities.length;
+    const observationCount = graph.observations.length;
+    const relationCount = graph.relations.length;
+    const lastUpdated = graph._lastModified 
+        ? new Date(graph._lastModified).toISOString().replace('T', ' ').substring(0, 19) + ' UTC'
+        : 'N/A';
+    
+    // Build index synchronously first to get size for stats display
+    await searchIntegrator.ensureIndex();
+    const indexSize = searchIntegrator.getIndexSize();
+    const indexSizeStr = indexSize >= 1024 * 1024 
+        ? `${(indexSize / (1024 * 1024)).toFixed(2)} MB`
+        : indexSize >= 1024 
+            ? `${(indexSize / 1024).toFixed(2)} KB`
+            : `${indexSize} B`;
+    
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.error("Knowledge Graph MCP Server running on stdio");
+    console.error(`[MCP Server] MemFS v${VERSION} running on stdio`);
+    console.error(`[Stats] ${entityCount} entities | ${observationCount} observations | ${relationCount} relations | last updated ${lastUpdated}`);
+    console.error(`[Stats] Index size: ${indexSizeStr}`);
 }
 main().catch((error) => {
     console.error("Fatal error in main():", error);

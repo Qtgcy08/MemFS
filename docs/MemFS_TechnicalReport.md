@@ -39,7 +39,7 @@ flowchart TD
 
 #### 2.1.2 全部操作通过 MCP 暴露
 
-MemFS 的每一个功能都是一个 MCP 工具，共计 16 个工具：
+MemFS 的每一个功能都是一个 MCP 工具，共计 17 个工具：
 | 类别     | 工具名称                   | 功能描述              | 典型使用场景      |
 | ------ | ---------------------- | ----------------- | ----------- |
 | **创建** | `createEntity`         | 批量创建实体（概念、人物、文献）  | 添加新知识条目     |
@@ -50,7 +50,6 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 16 个工具：
 |        | `readObservation`      | 根据 ID 批量读取观察内容      | 核查具体观察内容    |
 |        | `listNode`             | 列出所有实体概览          | 浏览知识库结构     |
 |        | `listGraph`            | 读取整个知识图谱          | 批量导出、数据迁移   |
-|        | `howWork`              | 获取推荐工作流指导         | 了解系统使用方法    |
 | **更新** | `updateNode`           | 更新实体及其观察内容        | 修改定义、更新笔记   |
 |        | `updateObservation`    | 批量更新观察内容          | 批量修正观察信息    |
 | **删除** | `deleteEntity`         | 删除实体及关联关系         | 移除过时或错误条目   |
@@ -58,6 +57,9 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 16 个工具：
 |        | `deleteObservation`    | 解除观察链接（保留观察）      | 移除实体引用      |
 |        | `getOrphanObservation` | 查找孤儿观察            | 发现无效数据      |
 |        | `recycleObservation`   | 回收并永久删除观察         | 清理无用数据      |
+| **辅助** | `howWork`              | 获取推荐工作流指导         | 了解系统使用方法    |
+|        | `getConsole`           | 获取缓冲的控制台日志和 Git 提交历史 | 查看自动提交记录、日志去重 |
+
 **设计理念**：每个工具做一件事，职责清晰。LLM 可以根据对话上下文选择合适的工具，就像人类研究者会查阅笔记、建立联系或整理资料一样。
 
 ### 2.2 跨平台与轻量化
@@ -99,7 +101,7 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 16 个工具：
 
 - 协议：使用官方的 MCP SDK
   
-  #### 2.2.3 不依赖 Embedding 的考量
+#### 2.2.3 不依赖 Embedding 的考量
   
   向量检索和 embedding 是当前知识库的热门方案，但 MemFS 刻意不采用这一技术路线：
   
@@ -110,6 +112,7 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 16 个工具：
   | 可解释性                                                                                      | 向量距离难以解释             | BM25 分数清晰可控      |
   | 可调试性                                                                                      | 黑盒模型，难以调优            | 算法参数透明           |
   | 领域适配                                                                                      | 通用模型，对专业术语效果一般       | 可针对性调整权重         |
+ 
  **核心观点**：对于人文社科研究者而言，**可控性比 SOTA 性能更重要**。他们需要知道为什么某个结果被检索出来，"知其然而知其所以然"，而不是接受一个黑盒模型的"魔术"。
   
   ### 2.3 完全本地化的 JSONL 存储
@@ -166,11 +169,12 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 16 个工具：
   | **存储位置**                                                        | `~/.memory/memory.jsonl`（默认），可通过环境变量自定义 |
   | **备份方式**                                                        | 复制粘贴即可备份、可放入 Git 版本控制、可同步到云端（Dropbox 等） |
   | **故障恢复**                                                        | 纯文本格式，无数据库依赖；即使 Node.js 崩溃，文件仍然完整       |
-  | **对于研究者而言**：他们的知识库是珍贵的数字资产，不应该被锁定在任何特定的技术栈中。JSONL 确保了数据的长期可访问性。 |                                         |
+
+**对于研究者而言**：他们的知识库是珍贵的数字资产，不应该被锁定在任何特定的技术栈中。JSONL 确保了数据的长期可访问性。
   
-  ### 2.4 人文社科研究需求定制
+### 2.4 人文社科研究需求定制
   
-  #### 2.4.1 知识结构的特殊需求
+#### 2.4.1 知识结构的特殊需求
   
   人文社科研究与软件开发有本质不同的知识管理需求：
   
@@ -182,7 +186,7 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 16 个工具：
   | 更新频率  | 高频更新      | 低频增补、高频引用      |
   | 精确性要求 | 运行正确      | 引用准确、概念清晰      |
   
-  #### 2.4.2 数据模型的定制
+#### 2.4.2 数据模型的定制
   
   MemFS 的数据模型直接反映了人文社科研究的思维方式：
   
@@ -191,14 +195,15 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 16 个工具：
   | **实体**      | `{name, entityType, definition, definitionSource, observationIds}` | 概念/人物/文献的主体记录 |
   | **观察**      | `{id, content, createdAt, updatedAt}`                              | 实体的补充信息、笔记、描述 |
   | **关系**      | `{from, to, relationType}`                                         | 实体之间的语义关联     |
-  | **核心设计洞察**： |                                                                    |               |
+
+**核心设计洞察**：
 1. **实体名称唯一**：每个概念、人物、文献有且只有一个"主条目"
 
 2. **观察外部化**：观察内容独立存储，实体只保存 ID 引用
 
 3. **多对多关系**：任何实体之间都可以建立任意关系
    
-   #### 2.4.3 研究工作流支持
+#### 2.4.3 研究工作流支持
    
    MemFS 的工具设计直接对应人文社科研究的典型工作流程：
    
@@ -209,9 +214,9 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 16 个工具：
    | 写作引用与核查 | `readNode`                                                 | 快速查阅引用，确保来源可靠   |
    | 定期整理与更新 | `updateNode` + `getOrphanObservation`+`recycleObservation` | 修正过时内容，清理冗余笔记   |
    
-   ### 2.5 文件系统设计思想的引入
+### 2.5 文件系统设计思想的引入
    
-   #### 2.5.1 类比与映射
+#### 2.5.1 类比与映射
    
    MemFS 的核心创新在于将文件系统的设计思想引入知识图谱管理：
    
@@ -224,7 +229,7 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 16 个工具：
    | TRIM 垃圾回收  | 孤儿观察发现与清理        | 资源泄漏与数据整洁  |
    | 文件元数据      | 双时间戳机制           | 知识演进追踪     |
    
-   #### 2.5.2 Inode 表模式：观察外部化
+#### 2.5.2 Inode 表模式：观察外部化
    
    **传统方式的问题：**
    
@@ -254,7 +259,7 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 16 个工具：
    }
    ```
    
-   #### 2.5.3 硬链接：观察共享机制
+#### 2.5.3 硬链接：观察共享机制
    
    ```javascript
    // 场景：两个研究者都记录了同一个事实
@@ -276,34 +281,123 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 16 个工具：
    
    这种设计的优势是写时复制（Copy-on-Write）的基础。
    
-   #### 2.5.4 写时复制（Copy-on-Write）
-   
-   当需要修改一个被多个实体共享的观察时，MemFS 自动创建新副本，避免影响其他实体：
-   
-   ```javascript
-   // 场景：张三的"程序员"要改为"资深程序员"
-   await updateNode({
-   entityName: "张三",
-   observationUpdates: [
-    { oldContent: "程序员", newContent: "资深程序员" }
-   ]
-   });
-   // 结果：张三获得新观察 ID，李四保持原观察 ID
-   {
-   entities: [
-    { name: "张三", observationIds: [4] },
+#### 2.5.4 写时复制（Copy-on-Write）
+
+当需要修改一个被多个实体共享的观察时，MemFS 自动创建新副本，避免影响其他实体。
+
+**实现位置**：`index.js` 第 1147-1181 行
+
+**核心算法**：
+
+```javascript
+// Handle observation updates (copy-on-write)
+if (observationUpdates && Array.isArray(observationUpdates)) {
+    let maxObsId = graph.observations.length > 0 
+        ? Math.max(...graph.observations.map(o => o.id))
+        : 0;
+    
+    for (const obsUpdate of observationUpdates) {
+        const { oldContent, newContent } = obsUpdate;
+        
+        // 1. 查找要修改的观察
+        const existingObs = graph.observations.find(o => o.content === oldContent);
+        
+        if (existingObs) {
+            // 2. 检查是否有其他实体引用此观察
+            const otherEntities = graph.entities.filter(e => 
+                e.name !== entityName && 
+                e.observationIds?.includes(existingObs.id)
+            );
+            
+            // 3. 判断：共享 OR 独占
+            if (otherEntities.length > 0) {
+                // ===== 共享观察：执行 Copy-on-Write =====
+                // 创建新观察，继承 createdAt
+                const newId = ++maxObsId;
+                graph.observations.push({
+                    id: newId,
+                    content: newContent,
+                    createdAt: existingObs.createdAt,  // 继承原始创建时间
+                    updatedAt: getCurrentTimestamp()     // 标记为新版本
+                });
+                // 更新当前实体的引用：从旧 ID 切换到新 ID
+                entity.observationIds = entity.observationIds.map(id => 
+                    id === existingObs.id ? newId : id
+                );
+            } else {
+                // ===== 独占观察：直接修改 =====
+                existingObs.content = newContent;
+                existingObs.updatedAt = getCurrentTimestamp();
+            }
+        }
+    }
+}
+```
+
+**执行流程图**：
+
+```mermaid
+flowchart TD
+    A["updateNode 调用"] --> B{"观察被其他实体引用?"}
+    B -->|是| C["创建新观察 ID"]
+    C --> D["新观察继承 createdAt"]
+    D --> E["设置 updatedAt"]
+    E --> F["实体引用切换到新 ID"]
+    B -->|否| G["直接修改原观察"]
+    G --> H["更新 updatedAt"]
+    F --> I["saveGraph 持久化"]
+    H --> I
+```
+
+**场景示例**：
+
+```javascript
+// 初始状态：两个实体共享同一观察
+{
+  entities: [
+    { name: "张三", observationIds: [1] },
     { name: "李四", observationIds: [1] }
-   ],
-   observations: [
-    { id: 1, content: "程序员" },      // 李四仍在使用
-    { id: 4, content: "资深程序员" }     // 张三的新观察
-   ]
-   }
-   ```
+  ],
+  observations: [
+    { id: 1, content: "程序员", createdAt: {...} }
+  ]
+}
+
+// 执行：张三的"程序员"改为"资深程序员"
+await updateNode({
+    entityName: "张三",
+    observationUpdates: [
+        { oldContent: "程序员", newContent: "资深程序员" }
+    ]
+});
+
+// 结果：观察被复制，张三指向新版本
+{
+  entities: [
+    { name: "张三", observationIds: [4] },  // 指向新观察
+    { name: "李四", observationIds: [1] }    // 保持原观察
+  ],
+  observations: [
+    { id: 1, content: "程序员", createdAt: {...} },        // 李四仍在使用
+    { id: 4, content: "资深程序员", createdAt: {...}, updatedAt: {...}  // 张三的新观察
+  ]
+}
+```
+
+**时间戳语义**：
+
+| 字段 | 含义 | 说明 |
+|-----|------|-----|
+| `createdAt` | 原始创建时间 | Copy-on-Write 后继承，保持知识的原始时间 |
+| `updatedAt` | 最后修改时间 | 仅当观察被修改时存在，直接修改时也会更新 |
+
+**重要意义**：
+1. **数据独立性**：多个实体可独立演进共享知识
+2. **历史可追溯**：通过 `createdAt` 可追溯原始创建时间
+3. **版本追踪**：`updatedAt` 标记每次修改
+4. **无数据丢失**：旧版本观察保留，其他实体不受影响
    
-   **重要意义**：这使得多个实体可以独立地丰富或修正共享知识，而不会产生冲突。
-   
-   #### 2.5.5 孤儿检测与垃圾回收
+#### 2.5.5 孤儿检测与垃圾回收
    
    随着时间推移，有些观察可能不再被任何实体引用（可能是误操作删除了链接）。MemFS 提供了孤儿检测机制：
    
@@ -315,7 +409,78 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 16 个工具：
    await recycleObservation([5]);
    ```
    
-   这类似于文件系统的 TRIM 磁盘清理，帮助保持知识库的整洁。
+这类似于文件系统的 TRIM 磁盘清理，帮助保持知识库的整洁。
+
+#### 2.5.6 Git 自动提交（Auto-Commit）
+
+MemFS 支持在每次保存时自动提交到 Git，实现知识库的历史版本管理。
+
+**环境变量**：`GITAUTOCOMMIT=true`
+
+**实现位置**：`index.js` 第 80-236 行（`gitSync` 对象）
+
+**Commit 格式**：
+
+```
+auto-commit:[operationContext] at [utc:YYYY-MM-DDTHH:mm:ss.SSSZ] [tz:Asia/Shanghai]
+```
+
+**字段说明**：
+
+| 字段 | 示例 | 说明 |
+|-----|------|------|
+| `operationContext` | `[createEntity "韦伯", "涂尔干"]` | 操作类型及涉及的实体 |
+| `utc` | `[utc:2026-04-04T10:30:00.000Z]` | UTC 时间戳 |
+| `tz` | `[tz:Asia/Shanghai]` | 本地时区 |
+
+**完整示例**：
+
+```
+auto-commit:[createEntity "韦伯", "涂尔干"] at [utc:2026-04-04T10:30:00.000Z] [tz:Asia/Shanghai]
+auto-commit:[updateNode "马克思"] at [utc:2026-04-04T10:35:00.000Z] [tz:Asia/Shanghai]
+auto-commit:[deleteEntity "过时概念"] at [utc:2026-04-04T10:40:00.000Z] [tz:Asia/Shanghai]
+```
+
+**Git Author 配置**：
+
+MemFS 自动配置 Git 用户信息，便于识别提交来源：
+
+| 配置项 | 格式 | 示例 |
+|-----|------|------|
+| `user.name` | `memfs-{version}` | `memfs-2.4.12` |
+| `user.email` | `username-memfs@hostname` | `qtgcy-memfs@DESKTOP-XXX` |
+
+**实现代码**：
+
+```javascript
+// index.js 第 174-179 行
+// Configure user (required for commits) - always set even if repo already exists
+// Format: author:"memfs-(version)", email:"username-memfs@hostname"
+const username = userInfo().username;
+const hostnameStr = hostname();
+await this.execGit(['config', 'user.email', `${username}-memfs@${hostnameStr}`], dir);
+await this.execGit(['config', 'user.name', `memfs-${VERSION}`], dir);
+```
+
+**Commit Message 生成**：
+
+```javascript
+// index.js 第 222-224 行
+const timestamp = new Date().toISOString();
+const tz = getSystemTimezone();
+const opInfo = operationContext ? `${operationContext}` : '';
+const commitMsg = `auto-commit:[${opInfo}] at [utc:${timestamp}] [tz:${tz}]`;
+```
+
+**查看提交历史**：
+
+使用 `getConsole` 工具可查看带 Author 信息的提交记录：
+
+```javascript
+await getConsole();
+// 输出格式: %h %an <%ae> %s
+// 例如: a1b2c3d qtgcy-memfs <qtgcy-memfs@DESKTOP-XXX> auto-commit:[createEntity "韦伯"] at [utc:...]
+```
 
 ---
 
@@ -417,13 +582,11 @@ flowchart LR
   | 输出            | 3 条 JSONL 记录（1 实体 + 2 观察）                                                                   |
   | **步骤 2：建立关联** |                                                                                             |
   | 阶段            | 内容                                                                                          |
-  | ------        | ------                                                                                      |
   | 输入            | `{from: "功能主义", to: "涂尔干", relationType: "开创"}`                                             |
   | 处理            | 验证实体存在 → 创建关系 → 追加到 JSONL                                                                   |
   | 输出            | 1 条 JSONL 记录（关系）                                                                            |
   | **步骤 3：搜索验证** |                                                                                             |
   | 阶段            | 内容                                                                                          |
-  | ------        | ------                                                                                      |
   | 输入            | `searchNode("功能主义")`                                                                        |
   | 输出            | 实体 + 观察 + 关系                                                                                |
 
@@ -486,11 +649,65 @@ if (needsMigration) {
 
 - **不支持实时同步**：依赖文件系统作为"真相源"
   
-  ### 5.3 未来可能的扩展方向
-  
+### 5.3 2.4.12 版本更新
+
+  2.4.12 是 MemFS 的重大更新版本，包含以下核心改动：
+
+#### Git Auto-Commit
+
+  - 环境变量：`GITAUTOCOMMIT=true`
+  - 每次 `saveGraph()` 自动提交到 Git
+  - 提交格式：`auto-sync: (operation_type "details") at UTC YYYY-MM-DDTHH:mm:ss.SSSZ`
+  - 实体名称用双引号包裹，如 `"Weber"`
+
+#### searchNode 重构
+
+  **统一分词系统**
+  - 移除 `isChineseText()` 语言检测
+  - 新增 `cleanText()` 统一清洗
+  - 统一 2~(n-1) gram 体系
+
+  **2-gram 惩罚**
+  ```javascript
+  function getGramPenalty(n) {
+      if (n === 2) return 0.5;  // ×0.5 惩罚，减少假阳性
+      return 1 / Math.pow(Math.E, n - 2);
+  }
+  ```
+
+  **字段权重调整（DEFAULT_FIELD_WEIGHTS）**
+  | 字段 | 权重 |
+  |------|------|
+  | name | 5.0 |
+  | entityType | 2.5 |
+  | definition | 2.5 |
+  | definitionSource | 1.5 |
+  | observation | 1.0 |
+
+  **其他优化**
+  - `definitionSource` 加入搜索索引
+  - 关系类型匹配 boost (1.5x)
+  - `searchMode` 移除
+  - `updatedAt` 字段加入 observations
+  - 关联实体总数受 `limit` 限制
+
+  #### 操作返回重构
+
+  - 写操作返回消息简化，减少 LLM token 消耗
+  - `deleteObservation` 改为 ID 输入，返回包含 `originalContent` 和 `observationData`
+  - `deleteEntity` 返回完整 `deletedEntities` 和 `deletedRelations` 便于撤销
+
+#### Console 去重
+
+  - `getConsole` 新增工具
+  - 消息去重（Set）
+  - trim 后去重
+
+### 5.4 未来可能的扩展方向
+
   | 方向     | 说明                              |
   | ------ | ------------------------------- |
-  | Git 联动 | 版本控制、云同步、分布式协作                  |
+  | 云同步    | 分布式协作、跨设备同步                    |
   | 可视化    | 生成知识图谱 DOT/Graphviz/Markmind  文件 |
   | 导入导出   | 支持常见格式（Markdown、CSV、BibTeX）     |
 
@@ -517,7 +734,7 @@ if (needsMigration) {
 
 - **渐进增强**：从简单关键词匹配平滑升级到混合检索
   
-  ### 6.3 核心思想的提炼
+### 6.3 核心思想的提炼
   
   | 核心思想           | 说明                  |
   | -------------- | ------------------- |

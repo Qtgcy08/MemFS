@@ -52,7 +52,6 @@
 
 **改进**：
 
-- 引入了 ISO 8601 标准时间格式
 - 本地时间带偏移量（如 `+0800`）
 
 **问题**：
@@ -261,8 +260,6 @@ function formatTimestamp(data) {
 > ```json
 > {"createdAt":{"utc":"2026-03-14T10:31:28.821Z","timezone":"Asia/Shanghai"}}
 > ```
->
-> **自动转换**：加载旧数据时，自动将 `"2026-02-09 22:02:06 Asia/Shanghai"` 格式转换回 `{utc, timezone}` 对象。更旧的格式（UTC ISO 或本地+偏移）保持不变。
 
 ---
 
