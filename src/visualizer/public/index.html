@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MemFS Visualizer - 知识图谱可视化</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/sigma@2.4.0/dist/sigma.min.js"></script>
+    <script src="https://unpkg.com/recharts@2.15.0/umd/Recharts.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            min-height: 100vh;
+        }
+        .app {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        .header {
+            background: linear-gradient(180deg, #161b22 0%, #0d1117 100%);
+            border-bottom: 1px solid #30363d;
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h1 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #58a6ff;
+            text-shadow: 0 0 20px rgba(88, 166, 255, 0.3);
+        }
+        .header .subtitle {
+            font-size: 12px;
+            color: #8b949e;
+            margin-top: 2px;
+        }
+        .nav {
+            display: flex;
+            gap: 8px;
+        }
+        .nav-btn {
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        .nav-btn:hover {
+            background: #30363d;
+            border-color: #58a6ff;
+        }
+        .nav-btn.active {
+            background: #1f6feb;
+            border-color: #58a6ff;
+            color: #fff;
+        }
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 16px;
+            gap: 16px;
+        }
+        .panel {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .panel-header {
+            background: #21262d;
+            padding: 12px 16px;
+            border-bottom: 1px solid #30363d;
+            font-weight: 600;
+            font-size: 14px;
+            color: #58a6ff;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .panel-content {
+            padding: 16px;
+        }
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #1a2332 0%, #0d1117 100%);
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #58a6ff, transparent);
+        }
+        .stat-card.blue::before { background: linear-gradient(90deg, transparent, #58a6ff, transparent); }
+        .stat-card.cyan::before { background: linear-gradient(90deg, transparent, #39d353, transparent); }
+        .stat-card.purple::before { background: linear-gradient(90deg, transparent, #a371f7, transparent); }
+        .stat-card.orange::before { background: linear-gradient(90deg, transparent, #d29922, transparent); }
+        .stat-value {
+            font-size: 36px;
+            font-weight: 700;
+            color: #fff;
+            text-shadow: 0 0 20px rgba(88, 166, 255, 0.5);
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #8b949e;
+            margin-top: 4px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        .graph-container {
+            height: 500px;
+            background: #0d1117;
+            position: relative;
+        }
+        #sigma-container {
+            width: 100%;
+            height: 100%;
+        }
+        .type-chart {
+            height: 300px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid #30363d;
+        }
+        th {
+            background: #21262d;
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #8b949e;
+        }
+        tr:hover td {
+            background: #21262d;
+        }
+        .entity-name {
+            color: #58a6ff;
+            cursor: pointer;
+        }
+        .entity-name:hover {
+            text-decoration: underline;
+        }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: #8b949e;
+        }
+        .btn {
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        .btn:hover {
+            background: #30363d;
+        }
+        .btn.primary {
+            background: #1f6feb;
+            border-color: #58a6ff;
+            color: #fff;
+        }
+        .btn.primary:hover {
+            background: #388bfd;
+        }
+        .btn.danger {
+            background: #da3633;
+            border-color: #f85149;
+            color: #fff;
+        }
+        .btn.danger:hover {
+            background: #f85149;
+        }
+        .form-group {
+            margin-bottom: 12px;
+        }
+        .form-group label {
+            display: block;
+            font-size: 12px;
+            color: #8b949e;
+            margin-bottom: 4px;
+        }
+        .form-group input, .form-group textarea, .form-group select {
+            width: 100%;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: #c9d1d9;
+            font-size: 14px;
+        }
+        .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
+            outline: none;
+            border-color: #58a6ff;
+        }
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            width: 500px;
+            max-height: 80vh;
+            overflow: auto;
+        }
+        .modal-header {
+            padding: 16px;
+            border-bottom: 1px solid #30363d;
+            font-weight: 600;
+            font-size: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            color: #8b949e;
+            cursor: pointer;
+            font-size: 20px;
+        }
+        .modal-close:hover { color: #fff; }
+        .modal-body { padding: 16px; }
+        .modal-footer {
+            padding: 16px;
+            border-top: 1px solid #30363d;
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+        .detail-section {
+            margin-bottom: 16px;
+        }
+        .detail-section h4 {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #8b949e;
+            margin-bottom: 8px;
+        }
+        .observation-item, .relation-item {
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+        }
+        .relation-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .relation-item .arrow {
+            color: #58a6ff;
+        }
+        .search-box {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        .search-box input {
+            flex: 1;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: #c9d1d9;
+            font-size: 14px;
+        }
+        .search-box input:focus {
+            outline: none;
+            border-color: #58a6ff;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #8b949e;
+        }
+        .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            color: #8b949e;
+        }
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 2px solid #30363d;
+            border-top-color: #58a6ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useCallback } = React;
+        const { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } = Recharts;
+
+        const API_BASE = '';
+
+        // 蓝色驾驶舱主题颜色
+        const COLORS = {
+            primary: '#58a6ff',
+            success: '#39d353',
+            warning: '#d29922',
+            danger: '#f85149',
+            purple: '#a371f7',
+            bg: '#0d1117',
+            panel: '#161b22',
+            border: '#30363d',
+            text: '#c9d1d9',
+            textSecondary: '#8b949e'
+        };
+
+        // API 工具函数
+        const api = {
+            async getStats() {
+                const res = await fetch(`${API_BASE}/api/stats`);
+                if (!res.ok) throw new Error('Failed to fetch stats');
+                return res.json();
+            },
+            async getGraph() {
+                const res = await fetch(`${API_BASE}/api/graph`);
+                if (!res.ok) throw new Error('Failed to fetch graph');
+                return res.json();
+            },
+            async getEntities() {
+                const res = await fetch(`${API_BASE}/api/entities`);
+                if (!res.ok) throw new Error('Failed to fetch entities');
+                return res.json();
+            },
+            async getEntity(name) {
+                const res = await fetch(`${API_BASE}/api/entities/${encodeURIComponent(name)}`);
+                if (!res.ok) throw new Error('Failed to fetch entity');
+                return res.json();
+            },
+            async createEntity(entities) {
+                const res = await fetch(`${API_BASE}/api/entities`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ entities })
+                });
+                if (!res.ok) throw new Error('Failed to create entity');
+                return res.json();
+            },
+            async updateEntity(name, data) {
+                const res = await fetch(`${API_BASE}/api/entities/${encodeURIComponent(name)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                if (!res.ok) throw new Error('Failed to update entity');
+                return res.json();
+            },
+            async deleteEntity(name) {
+                const res = await fetch(`${API_BASE}/api/entities/${encodeURIComponent(name)}`, {
+                    method: 'DELETE'
+                });
+                if (!res.ok) throw new Error('Failed to delete entity');
+                return res.json();
+            },
+            async createRelation(relations) {
+                const res = await fetch(`${API_BASE}/api/relations`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ relations })
+                });
+                if (!res.ok) throw new Error('Failed to create relation');
+                return res.json();
+            },
+            async deleteRelation(relations) {
+                const res = await fetch(`${API_BASE}/api/relations`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ relations })
+                });
+                if (!res.ok) throw new Error('Failed to delete relation');
+                return res.json();
+            },
+            async addObservation(entityName, contents) {
+                const res = await fetch(`${API_BASE}/api/observations`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ observations: [{ entityName, contents }] })
+                });
+                if (!res.ok) throw new Error('Failed to add observation');
+                return res.json();
+            },
+            async search(query) {
+                const res = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(query)}`);
+                if (!res.ok) throw new Error('Failed to search');
+                return res.json();
+            }
+        };
+
+        // 统计卡片组件
+        function StatCard({ value, label, color }) {
+            return (
+                <div className={`stat-card ${color}`}>
+                    <div className="stat-value">{value ?? '-'}</div>
+                    <div className="stat-label">{label}</div>
+                </div>
+            );
+        }
+
+        // 实体类型分布图表
+        function TypeDistributionChart({ data }) {
+            const chartData = Object.entries(data || {}).map(([name, value]) => ({ name, value }));
+            return (
+                <ResponsiveContainer width="100%" height={250}>
+                    <PieChart>
+                        <Pie
+                            data={chartData}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={60}
+                            outerRadius={100}
+                            paddingAngle={2}
+                            dataKey="value"
+                            label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                        >
+                            {chartData.map((_, index) => (
+                                <Cell key={`cell-${index}`} fill={Object.values(COLORS)[index % 5]} />
+                            ))}
+                        </Pie>
+                        <Tooltip 
+                            contentStyle={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 8 }}
+                        />
+                    </PieChart>
+                </ResponsiveContainer>
+            );
+        }
+
+        // 网络图组件
+        function NetworkGraph({ data, onNodeClick }) {
+            const containerRef = React.useRef(null);
+            const sigmaRef = React.useRef(null);
+
+            React.useEffect(() => {
+                if (!containerRef.current || !data) return;
+
+                // 清理旧的 sigma 实例
+                if (sigmaRef.current) {
+                    sigmaRef.current.kill();
+                    sigmaRef.current = null;
+                }
+
+                const nodes = (data.nodes || []).map(n => ({
+                    id: n.id,
+                    label: n.label,
+                    x: Math.random() * 100,
+                    y: Math.random() * 100,
+                    size: n.size || 5,
+                    color: COLORS.primary
+                }));
+
+                const edges = (data.edges || []).map(e => ({
+                    id: e.id,
+                    source: e.source,
+                    target: e.target,
+                    label: e.relationType || '',
+                    color: COLORS.textSecondary,
+                    size: 1
+                }));
+
+                if (nodes.length === 0) return;
+
+                const sigma = new Sigma({ graph: { nodes, edges }, container: containerRef.current });
+                sigmaRef.current = sigma;
+
+                sigma.on('clickNode', ({ node }) => {
+                    if (onNodeClick) onNodeClick(node);
+                });
+
+                return () => {
+                    if (sigmaRef.current) {
+                        sigmaRef.current.kill();
+                        sigmaRef.current = null;
+                    }
+                };
+            }, [data, onNodeClick]);
+
+            return <div ref={containerRef} id="sigma-container" style={{ width: '100%', height: '100%' }} />;
+        }
+
+        // 创建实体弹窗
+        function CreateEntityModal({ onClose, onSuccess }) {
+            const [form, setForm] = useState({ name: '', entityType: '', definition: '', observations: '' });
+            const [loading, setLoading] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                try {
+                    const observations = form.observations ? form.observations.split('\n').filter(o => o.trim()) : [];
+                    await api.createEntity([{
+                        name: form.name,
+                        entityType: form.entityType || 'unknown',
+                        definition: form.definition || '',
+                        observations
+                    }]);
+                    onSuccess();
+                    onClose();
+                } catch (err) {
+                    alert('创建失败: ' + err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="modal-overlay" onClick={onClose}>
+                    <div className="modal" onClick={e => e.stopPropagation()}>
+                        <div className="modal-header">
+                            创建实体
+                            <button className="modal-close" onClick={onClose}>&times;</button>
+                        </div>
+                        <form onSubmit={handleSubmit}>
+                            <div className="modal-body">
+                                <div className="form-group">
+                                    <label>名称 *</label>
+                                    <input required value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="实体名称" />
+                                </div>
+                                <div className="form-group">
+                                    <label>类型</label>
+                                    <input value={form.entityType} onChange={e => setForm({...form, entityType: e.target.value})} placeholder="如: 人物、概念、文档" />
+                                </div>
+                                <div className="form-group">
+                                    <label>定义</label>
+                                    <textarea value={form.definition} onChange={e => setForm({...form, definition: e.target.value})} placeholder="实体定义或描述" rows={3} />
+                                </div>
+                                <div className="form-group">
+                                    <label>观察（每行一个）</label>
+                                    <textarea value={form.observations} onChange={e => setForm({...form, observations: e.target.value})} placeholder="观察内容，每行一个" rows={4} />
+                                </div>
+                            </div>
+                            <div className="modal-footer">
+                                <button type="button" className="btn" onClick={onClose}>取消</button>
+                                <button type="submit" className="btn primary" disabled={loading}>
+                                    {loading ? '创建中...' : '创建'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
+        // 创建关系弹窗
+        function CreateRelationModal({ entities, onClose, onSuccess }) {
+            const [form, setForm] = useState({ from: '', to: '', relationType: '' });
+            const [loading, setLoading] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                try {
+                    await api.createRelation([form]);
+                    onSuccess();
+                    onClose();
+                } catch (err) {
+                    alert('创建失败: ' + err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="modal-overlay" onClick={onClose}>
+                    <div className="modal" onClick={e => e.stopPropagation()}>
+                        <div className="modal-header">
+                            创建关系
+                            <button className="modal-close" onClick={onClose}>&times;</button>
+                        </div>
+                        <form onSubmit={handleSubmit}>
+                            <div className="modal-body">
+                                <div className="form-row">
+                                    <div className="form-group">
+                                        <label>源实体 *</label>
+                                        <select required value={form.from} onChange={e => setForm({...form, from: e.target.value})}>
+                                            <option value="">选择实体</option>
+                                            {entities.map(e => <option key={e.name} value={e.name}>{e.name}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="form-group">
+                                        <label>目标实体 *</label>
+                                        <select required value={form.to} onChange={e => setForm({...form, to: e.target.value})}>
+                                            <option value="">选择实体</option>
+                                            {entities.map(e => <option key={e.name} value={e.name}>{e.name}</option>)}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div className="form-group">
+                                    <label>关系类型 *</label>
+                                    <input required value={form.relationType} onChange={e => setForm({...form, relationType: e.target.value})} placeholder="如: 基于、相关、影响" />
+                                </div>
+                            </div>
+                            <div className="modal-footer">
+                                <button type="button" className="btn" onClick={onClose}>取消</button>
+                                <button type="submit" className="btn primary" disabled={loading}>
+                                    {loading ? '创建中...' : '创建'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
+        // 实体详情弹窗
+        function EntityDetailModal({ entity, onClose, onDeleted }) {
+            const [loading, setLoading] = useState(false);
+
+            const handleDelete = async () => {
+                if (!confirm('确定删除这个实体吗？')) return;
+                setLoading(true);
+                try {
+                    await api.deleteEntity(entity.name);
+                    onDeleted();
+                    onClose();
+                } catch (err) {
+                    alert('删除失败: ' + err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="modal-overlay" onClick={onClose}>
+                    <div className="modal" onClick={e => e.stopPropagation()}>
+                        <div className="modal-header">
+                            {entity.name}
+                            <button className="modal-close" onClick={onClose}>&times;</button>
+                        </div>
+                        <div className="modal-body">
+                            <div className="detail-section">
+                                <h4>基本信息</h4>
+                                <p><span className="badge">{entity.entityType}</span></p>
+                                {entity.definition && <p style={{marginTop: 8}}>{entity.definition}</p>}
+                            </div>
+                            
+                            {entity.observations && entity.observations.length > 0 && (
+                                <div className="detail-section">
+                                    <h4>观察 ({entity.observations.length})</h4>
+                                    {entity.observations.map((obs, i) => (
+                                        <div key={i} className="observation-item">
+                                            <span style={{color: obs.content ? COLORS.text : COLORS.textSecondary}}>
+                                                {obs.content || '(无内容)'}
+                                            </span>
+                                            {obs.createdAt && (
+                                                <span style={{fontSize: 11, color: COLORS.textSecondary, marginLeft: 8}}>
+                                                    {obs.createdAt}
+                                                </span>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            
+                            {entity.relations && entity.relations.length > 0 && (
+                                <div className="detail-section">
+                                    <h4>关系 ({entity.relations.length})</h4>
+                                    {entity.relations.map((rel, i) => (
+                                        <div key={i} className="relation-item">
+                                            <span>{rel.from}</span>
+                                            <span className="arrow">-{rel.relationType}-></span>
+                                            <span>{typeof rel.to === 'object' ? rel.to.name : rel.to}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        <div className="modal-footer">
+                            <button className="btn danger" onClick={handleDelete} disabled={loading}>删除</button>
+                            <button className="btn" onClick={onClose}>关闭</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // 主应用
+        function App() {
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [loading, setLoading] = useState(true);
+            const [stats, setStats] = useState(null);
+            const [graph, setGraph] = useState({ nodes: [], edges: [] });
+            const [entities, setEntities] = useState([]);
+            const [selectedEntity, setSelectedEntity] = useState(null);
+            const [searchQuery, setSearchQuery] = useState('');
+            const [showCreateEntity, setShowCreateEntity] = useState(false);
+            const [showCreateRelation, setShowCreateRelation] = useState(false);
+
+            const loadData = useCallback(async () => {
+                setLoading(true);
+                try {
+                    const [statsData, graphData, entitiesData] = await Promise.all([
+                        api.getStats(),
+                        api.getGraph(),
+                        api.getEntities()
+                    ]);
+                    setStats(statsData);
+                    setGraph(graphData);
+                    setEntities(entitiesData);
+                } catch (err) {
+                    console.error('Failed to load data:', err);
+                } finally {
+                    setLoading(false);
+                }
+            }, []);
+
+            useEffect(() => {
+                loadData();
+            }, [loadData]);
+
+            const handleSearch = async (query) => {
+                setSearchQuery(query);
+                if (!query.trim()) {
+                    loadData();
+                    return;
+                }
+                setLoading(true);
+                try {
+                    const results = await api.search(query);
+                    // 转换搜索结果为实体格式
+                    setEntities(results.entities || []);
+                } catch (err) {
+                    console.error('Search failed:', err);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleNodeClick = async (nodeId) => {
+                try {
+                    const data = await api.getEntity(nodeId);
+                    setSelectedEntity(data);
+                } catch (err) {
+                    console.error('Failed to load entity:', err);
+                }
+            };
+
+            if (loading && !stats) {
+                return (
+                    <div className="app">
+                        <div className="header">
+                            <div>
+                                <h1>MemFS Visualizer</h1>
+                                <div className="subtitle">知识图谱可视化</div>
+                            </div>
+                        </div>
+                        <div className="main">
+                            <div className="loading">
+                                <div className="spinner"></div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="app">
+                    <div className="header">
+                        <div>
+                            <h1>MemFS Visualizer</h1>
+                            <div className="subtitle">知识图谱可视化</div>
+                        </div>
+                        <div className="nav">
+                            <button className={`nav-btn ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>统计</button>
+                            <button className={`nav-btn ${activeTab === 'graph' ? 'active' : ''}`} onClick={() => setActiveTab('graph')}>图谱</button>
+                            <button className={`nav-btn ${activeTab === 'entities' ? 'active' : ''}`} onClick={() => setActiveTab('entities')}>实体</button>
+                        </div>
+                    </div>
+
+                    <div className="main">
+                        {activeTab === 'dashboard' && (
+                            <>
+                                <div className="dashboard">
+                                    <StatCard value={stats?.entityCount} label="实体总数" color="blue" />
+                                    <StatCard value={stats?.observationCount} label="观察总数" color="cyan" />
+                                    <StatCard value={stats?.relationCount} label="关系总数" color="purple" />
+                                    <StatCard value={Object.keys(stats?.entityTypes || {}).length} label="类型数量" color="orange" />
+                                </div>
+                                <div className="two-col">
+                                    <div className="panel">
+                                        <div className="panel-header">实体类型分布</div>
+                                        <div className="panel-content type-chart">
+                                            <TypeDistributionChart data={stats?.entityTypes} />
+                                        </div>
+                                    </div>
+                                    <div className="panel">
+                                        <div className="panel-header">关系网络</div>
+                                        <div className="panel-content graph-container">
+                                            <NetworkGraph data={graph} onNodeClick={handleNodeClick} />
+                                        </div>
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        {activeTab === 'graph' && (
+                            <div className="panel" style={{flex: 1}}>
+                                <div className="panel-header">
+                                    实体关系图谱
+                                    <button className="btn primary" onClick={() => setShowCreateRelation(true)}>+ 创建关系</button>
+                                </div>
+                                <div className="panel-content graph-container" style={{height: 'calc(100vh - 250px)'}}>
+                                    <NetworkGraph data={graph} onNodeClick={handleNodeClick} />
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'entities' && (
+                            <div className="panel" style={{flex: 1}}>
+                                <div className="panel-header">
+                                    实体列表
+                                    <div style={{display: 'flex', gap: 8}}>
+                                        <button className="btn primary" onClick={() => setShowCreateEntity(true)}>+ 创建实体</button>
+                                        <button className="btn" onClick={() => setShowCreateRelation(true)}>+ 创建关系</button>
+                                    </div>
+                                </div>
+                                <div className="panel-content">
+                                    <div className="search-box">
+                                        <input
+                                            type="text"
+                                            placeholder="搜索实体..."
+                                            value={searchQuery}
+                                            onChange={e => handleSearch(e.target.value)}
+                                        />
+                                        <button className="btn" onClick={() => { setSearchQuery(''); loadData(); }}>重置</button>
+                                    </div>
+                                    {entities.length === 0 ? (
+                                        <div className="empty-state">
+                                            <div className="icon">📦</div>
+                                            <p>暂无实体</p>
+                                        </div>
+                                    ) : (
+                                        <table>
+                                            <thead>
+                                                <tr>
+                                                    <th>名称</th>
+                                                    <th>类型</th>
+                                                    <th>定义</th>
+                                                    <th>观察数</th>
+                                                    <th>操作</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {entities.map(entity => (
+                                                    <tr key={entity.name}>
+                                                        <td><span className="entity-name" onClick={() => handleNodeClick(entity.name)}>{entity.name}</span></td>
+                                                        <td><span className="badge">{entity.entityType}</span></td>
+                                                        <td style={{maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{entity.definition}</td>
+                                                        <td>{entity.observationIds?.length || 0}</td>
+                                                        <td>
+                                                            <button className="btn" onClick={() => handleNodeClick(entity.name)}>查看</button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {showCreateEntity && (
+                        <CreateEntityModal
+                            onClose={() => setShowCreateEntity(false)}
+                            onSuccess={loadData}
+                        />
+                    )}
+
+                    {showCreateRelation && (
+                        <CreateRelationModal
+                            entities={entities}
+                            onClose={() => setShowCreateRelation(false)}
+                            onSuccess={loadData}
+                        />
+                    )}
+
+                    {selectedEntity && (
+                        <EntityDetailModal
+                            entity={selectedEntity}
+                            onClose={() => setSelectedEntity(null)}
+                            onDeleted={loadData}
+                        />
+                    )}
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

@@ -54,7 +54,7 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 17 个工具：
 |        | `updateObservation`    | 批量更新观察内容          | 批量修正观察信息    |
 | **删除** | `deleteEntity`         | 删除实体及关联关系         | 移除过时或错误条目   |
 |        | `deleteRelation`       | 删除特定关系            | 解除实体间的关联    |
-|        | `deleteObservation`    | 解除观察链接（保留观察）      | 移除实体引用      |
+|        | `unlinkObservation`    | 解除观察链接（保留观察）      | 移除实体引用      |
 |        | `getOrphanObservation` | 查找孤儿观察            | 发现无效数据      |
 |        | `recycleObservation`   | 回收并永久删除观察         | 清理无用数据      |
 | **辅助** | `howWork`              | 获取推荐工作流指导         | 了解系统使用方法    |
@@ -694,7 +694,7 @@ if (needsMigration) {
   #### 操作返回重构
 
   - 写操作返回消息简化，减少 LLM token 消耗
-  - `deleteObservation` 改为 ID 输入，返回包含 `originalContent` 和 `observationData`
+  - `unlinkObservation` 改为 ID 输入，返回包含 `originalContent` 和 `observationData`
   - `deleteEntity` 返回完整 `deletedEntities` 和 `deletedRelations` 便于撤销
 
 #### Console 去重

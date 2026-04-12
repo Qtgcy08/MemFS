@@ -141,13 +141,13 @@ async function test() {
     
     if (obsToDelete) {
         const obsCountBefore = react.observationIds.length;
-        await manager.deleteObservation([{
+        await manager.unlinkObservation([{
             observation: "使用JSX",
             entityNames: ["React"]
         }]);
         
         const afterDel = await manager.readNode(["React"]);
-        assert(afterDel.entities[0].observationIds.length < obsCountBefore, "deleteObservation 解除链接成功");
+        assert(afterDel.entities[0].observationIds.length < obsCountBefore, "unlinkObservation 解除链接成功");
         
         const orphans = await manager.getOrphanObservation();
         const orphanExists = orphans.some(o => o.content === "使用JSX");

@@ -11,3 +11,5 @@ temp/
 .test_*.jsonl
 .test_mcp_*/
 .memfs/
+# Skills
+skills/*.zip
