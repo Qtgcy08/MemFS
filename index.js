@@ -831,9 +831,19 @@ export class KnowledgeGraphManager {
         await this.saveGraph(graph);
         return newRelations;
     }
+    /**
+     * Add observations to entities
+     * 
+     * Supports two modes:
+     * 1. Create new observations: provide 'contents' array
+     *    - Deduplication: if content already exists, links to existing observation
+     * 2. Link to existing observations: provide 'observationId' or 'observationIds'
+     *    - For observation reuse across multiple entities
+     * 
+     * @param {Array} observations - Array of { entityName, contents?, observationId?, observationIds? }
+     */
     async addObservation(observations) {
         const graph = await this.loadGraph();
-        const now = getCurrentTimestamp();
         
         // Get next observation ID
         let maxObsId = graph.observations.length > 0 
@@ -850,31 +860,67 @@ export class KnowledgeGraphManager {
             
             entity.observationIds = entity.observationIds || [];
             
-            for (const content of o.contents) {
-                // Check if same observation already exists (deduplication)
-                const existingObs = graph.observations.find(obs => obs.content === content);
-                
-                if (existingObs) {
-                    // Add existing observation ID if not already linked
-                    if (!entity.observationIds.includes(existingObs.id)) {
-                        entity.observationIds.push(existingObs.id);
+            const newIds = [];
+            const linkedIds = [];
+            const newContents = [];
+            
+            // Mode 2: Link to existing observations by ID
+            if (o.observationId !== undefined) {
+                const obs = graph.observations.find(obs => obs.id === o.observationId);
+                if (!obs) {
+                    throw new Error(`Observation with ID "${o.observationId}" not found`);
+                }
+                if (!entity.observationIds.includes(o.observationId)) {
+                    entity.observationIds.push(o.observationId);
+                    linkedIds.push(o.observationId);
+                }
+            }
+            
+            if (o.observationIds !== undefined) {
+                for (const obsId of o.observationIds) {
+                    const obs = graph.observations.find(obs => obs.id === obsId);
+                    if (!obs) {
+                        throw new Error(`Observation with ID "${obsId}" not found`);
                     }
-                } else {
-                    // Create new centralized observation
-                    const newId = ++maxObsId;
-                    graph.observations.push({
-                        id: newId,
-                        content: content,
-                        createdAt: getCurrentTimestamp()
-                    });
-                    entity.observationIds.push(newId);
+                    if (!entity.observationIds.includes(obsId)) {
+                        entity.observationIds.push(obsId);
+                        linkedIds.push(obsId);
+                    }
+                }
+            }
+            
+            // Mode 1: Create new observations by content (only if no observationId(s) provided)
+            if (o.contents && o.observationId === undefined && !o.observationIds) {
+                for (const content of o.contents) {
+                    // Check if same observation already exists (deduplication)
+                    const existingObs = graph.observations.find(obs => obs.content === content);
+                    
+                    if (existingObs) {
+                        // Add existing observation ID if not already linked
+                        if (!entity.observationIds.includes(existingObs.id)) {
+                            entity.observationIds.push(existingObs.id);
+                            linkedIds.push(existingObs.id);
+                        }
+                    } else {
+                        // Create new centralized observation
+                        const newId = ++maxObsId;
+                        graph.observations.push({
+                            id: newId,
+                            content: content,
+                            createdAt: getCurrentTimestamp()
+                        });
+                        entity.observationIds.push(newId);
+                        newIds.push(newId);
+                        newContents.push(content);
+                    }
                 }
             }
             
             results.push({
                 entityName: o.entityName,
-                addedObservations: o.contents,
-                addedObservationIds: entity.observationIds.slice(-o.contents.length)  // Last N IDs added
+                addedObservations: newContents.length > 0 ? newContents : undefined,
+                addedObservationIds: newIds.length > 0 ? newIds : undefined,
+                linkedObservationIds: linkedIds.length > 0 ? linkedIds : undefined
             });
         }
         
@@ -904,7 +950,7 @@ export class KnowledgeGraphManager {
             deletedRelations
         };
     }
-    async deleteObservation(observationIds, entityNames) {
+    async unlinkObservation(observationIds, entityNames) {
         const graph = await this.loadGraph();
         const warnings = [];
         const results = [];
@@ -968,7 +1014,7 @@ export class KnowledgeGraphManager {
         
         // Set operation context for git commit
         const opDetails = obsIds.map(id => `obs#${id}`);
-        this._setOperation('deleteObservation', ...opDetails);
+        this._setOperation('unlinkObservation', ...opDetails);
         
         await this.saveGraph(graph);
         
@@ -1628,30 +1674,59 @@ server.registerTool("createRelation", {
     };
 });
 // Register add_observations tool
-server.registerTool("addObservation", {
+ server.registerTool("addObservation", {
     title: "Add Observation",
-    description: "Add observations to multiple entities. Supports batch operations across different entities.",
+    description: "Add observations to multiple entities. Supports two modes:\n1. Create: provide 'contents' array to create new observations (deduplication applies)\n2. Link: provide 'observationId' or 'observationIds' to link to existing observations\n\nMode selection is determined by which fields are provided (mutually exclusive per item).",
     inputSchema: {
-        observations: z.array(z.object({
-            entityName: z.string().describe("The name of the entity to add the observations to"),
-            contents: z.array(z.string()).describe("An array of observation contents to add")
-        }))
+        // 使用 discriminatedUnion 处理互斥字段：contents 和 observationId(s) 二选一
+        observations: z.array(z.discriminatedUnion('mode', [
+            // Mode 1: Create new observations by content
+            z.object({
+                mode: z.literal('create'),
+                entityName: z.string().describe("The name of the entity to add the observations to"),
+                contents: z.array(z.string()).describe("Create new observations with these contents (deduplication applies)")
+            }),
+            // Mode 2: Link to existing observation by ID
+            z.object({
+                mode: z.literal('link-single'),
+                entityName: z.string().describe("The name of the entity to add the observations to"),
+                observationId: z.number().describe("Link to an existing observation by ID (for reuse)")
+            }),
+            // Mode 3: Link to multiple existing observations by IDs
+            z.object({
+                mode: z.literal('link-multi'),
+                entityName: z.string().describe("The name of the entity to add the observations to"),
+                observationIds: z.array(z.number()).describe("Link to multiple existing observations by ID (for reuse)")
+            })
+        ]))
     },
     outputSchema: {
         results: z.array(z.object({
             entityName: z.string(),
-            addedObservations: z.array(z.string()),
-            addedObservationIds: z.array(z.number()).optional()
+            addedObservations: z.array(z.string()).optional(),
+            addedObservationIds: z.array(z.number()).optional(),
+            linkedObservationIds: z.array(z.number()).optional()
         }))
     }
-}, async ({ observations }) => {
-    const result = await knowledgeGraphManager.addObservation(observations);
+ }, async ({ observations }) => {
+    // Transform discriminated union format back to internal format
+    const internalObs = observations.map(o => ({
+        entityName: o.entityName,
+        contents: o.mode === 'create' ? o.contents : undefined,
+        observationId: o.mode === 'link-single' ? o.observationId : undefined,
+        observationIds: o.mode === 'link-multi' ? o.observationIds : undefined
+    }));
+    const result = await knowledgeGraphManager.addObservation(internalObs);
     const allNewIds = result.flatMap(r => r.addedObservationIds || []);
+    const allLinkedIds = result.flatMap(r => r.linkedObservationIds || []);
+    const msgParts = [];
+    if (allNewIds.length > 0) msgParts.push(`new obs IDs: [${allNewIds.join(', ')}]`);
+    if (allLinkedIds.length > 0) msgParts.push(`linked IDs: [${allLinkedIds.join(', ')}]`);
     return {
-        content: [{ type: "text", text: `Added observations to ${result.length} entities, new obs IDs: [${allNewIds.join(', ')}]` }],
+        content: [{ type: "text", text: `Added observations to ${result.length} entities, ${msgParts.join(', ')}` }],
         structuredContent: { results: result }
     };
-});
+ });
 // Register delete_entities tool
 server.registerTool("deleteEntity", {
     title: "Delete Entity",
@@ -1688,9 +1763,9 @@ server.registerTool("deleteEntity", {
         }
     };
 });
-// Register delete_observations tool
-server.registerTool("deleteObservation", {
-    title: "Delete Observation",
+// Register unlink_observations tool
+server.registerTool("unlinkObservation", {
+    title: "Unlink Observation",
     description: "Remove observation links from entities by observation ID. Returns full observation content for potential undo.",
     inputSchema: {
         observationIds: z.array(z.number()).describe("Observation IDs to unlink"),
@@ -1713,7 +1788,7 @@ server.registerTool("deleteObservation", {
         }))
     }
 }, async ({ observationIds, entityNames }) => {
-    const result = await knowledgeGraphManager.deleteObservation(observationIds, entityNames);
+    const result = await knowledgeGraphManager.unlinkObservation(observationIds, entityNames);
     const unlinkedIds = result.results.filter(r => r.observationId).map(r => r.observationId);
     const contents = result.results.filter(r => r.originalContent).map(r => `"${r.originalContent.substring(0, 20)}..."`);
     const warningText = result.warnings.length > 0 

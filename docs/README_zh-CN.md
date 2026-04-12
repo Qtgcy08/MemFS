@@ -86,7 +86,7 @@ GITAUTOCOMMIT=true node index.js
 新增 `GITAUTOCOMMIT=true` 环境变量，启用后每次操作自动提交到 Git：
 
 ```
-auto-sync: (createEntity "韦伯") at UTC 2026-03-28T12:34:56.789Z
+auto-commit:[createEntity "韦伯"] at [utc:2026-03-28T12:34:56.789Z] [tz:Asia/Shanghai]
 ```
 
 ### searchNode 重构
@@ -105,7 +105,7 @@ auto-sync: (createEntity "韦伯") at UTC 2026-03-28T12:34:56.789Z
 
 - 写操作返回消息精简，减少 LLM token 消耗
 - 删除操作返回完整数据，便于撤销
-- `deleteObservation` 改为 ID 输入
+- `unlinkObservation` 改为 ID 输入（从 deleteObservation 更名）
 
 ### 辅助工具
 
@@ -202,7 +202,7 @@ flowchart TD
 | ---------------------- | ------------ | ------ |
 | `deleteEntity`         | 删除实体及关联关系    | 移除过时条目 |
 | `deleteRelation`       | 删除特定关系       | 解除关联   |
-| `deleteObservation`    | 解除观察链接（保留观察） | 移除引用   |
+| `unlinkObservation`    | 解除观察链接（保留观察） | 移除引用   |
 | `getOrphanObservation` | 查找孤儿观察       | 发现无效数据 |
 | `recycleObservation`   | 回收并永久删除观察    | 清理无用数据 |
 
@@ -361,14 +361,14 @@ GITAUTOCOMMIT=true node index.js
 ### 提交格式
 
 ```
-auto-sync: (操作类型 "详情") at UTC YYYY-MM-DDTHH:mm:ss.SSSZ
+auto-commit:[operationContext] at [utc:YYYY-MM-DDTHH:mm:ss.SSSZ] [tz:Asia/Shanghai]
 ```
 
 示例：
 ```
-auto-sync: (createEntity "韦伯") at UTC 2026-03-22T09:15:30.123Z
-auto-sync: (updateNode "涂尔干") at UTC 2026-03-22T09:16:45.456Z
-auto-sync: (deleteRelation "韦伯"→"涂尔干") at UTC 2026-03-22T09:17:00.789Z
+auto-commit:[createEntity "韦伯"] at [utc:2026-03-22T09:15:30.123Z] [tz:Asia/Shanghai]
+auto-commit:[updateNode "涂尔干"] at [utc:2026-03-22T09:16:45.456Z] [tz:Asia/Shanghai]
+auto-commit:[deleteRelation "韦伯"→"涂尔干"] at [utc:2026-03-22T09:17:00.789Z] [tz:Asia/Shanghai]
 ```
 
 ### 查看提交历史
