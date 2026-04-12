@@ -122,9 +122,9 @@ function getGramPenalty(n) {
 | updateNode | `Updated N entities: [names]` |
 | updateObservation | `Updated observations: [ids]` |
 | deleteEntity | `Deleted entities: [names]` |
-| deleteObservation | `Unlinked observations: [ids]` |
+| unlinkObservation | `Unlinked observations: [ids]` |
 
-**deleteObservation 重构**
+**unlinkObservation 重构**
 - 输入从 content 改为 ID
 - 输出包含 `originalContent` 和 `observationData`
 
@@ -285,11 +285,11 @@ return {
 
 ---
 
-### c6ca7d1 - deleteObservation 重构
+### c6ca7d1 - unlinkObservation 重构
 
 ```javascript
 // 输入从 content 改为 ID
-async deleteObservation(observationIds, entityNames) {
+async unlinkObservation(observationIds, entityNames) {
     const obs = graph.observations.find(o => o.id === obsId);
     results.push({
         observationId: obs.id,
@@ -308,5 +308,5 @@ async deleteObservation(observationIds, entityNames) {
 | 2.4.12 | ec8a260 | Git Auto-Commit 功能引入 |
 | 2.4.12 | 71b51a7 ~ f17818c | searchNode 重构、分词系统、2-gram 惩罚 |
 | 2.4.12 | 1a5ff02, c87f69b | Console 去重、新增 getConsole |
-| 2.4.12 | caaf7b7, c6ca7d1 | 操作返回简化、deleteObservation 重构 |
+| 2.4.12 | caaf7b7, c6ca7d1 | 操作返回简化、unlinkObservation 重构 |
 | 2.4.12 | b279ceb, 99329b8, 344414a | Schema 修复 |

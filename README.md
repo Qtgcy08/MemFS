@@ -107,7 +107,7 @@ auto-commit:[createEntity "Weber"] at [utc:2026-03-28T12:34:56.789Z] [tz:Asia/Sh
 
 - Write operation messages simplified (less LLM token consumption)
 - Delete operations return full data for potential undo
-- `deleteObservation` now uses ID-based input
+- `unlinkObservation` now uses ID-based input (renamed from deleteObservation)
 
 ### Auxiliary Tools
 
@@ -205,7 +205,7 @@ flowchart TD
 |------|----------|---------|
 | `deleteEntity` | Delete entities and relations | Remove outdated entries |
 | `deleteRelation` | Delete specific relations | Unlink entities |
-| `deleteObservation` | Unlink observations (preserve observation) | Remove references |
+| `unlinkObservation` | Unlink observations (preserve observation) | Remove references |
 | `getOrphanObservation` | Find orphan observations | Discover invalid data |
 | `recycleObservation` | Permanently delete observations | Clean up unused data |
 
