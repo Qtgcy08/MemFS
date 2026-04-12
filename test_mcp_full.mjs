@@ -61,7 +61,7 @@ async function test() {
         MEMORY_DIR: memoryDir
     });
 
-    console.log('🧪 MCP 完整功能测试 (16 个工具)\n');
+    console.log('🧪 MCP 完整功能测试 (19 个工具)\n');
     console.log('测试时间: ' + new Date().toISOString());
     console.log('测试目录: ' + memoryDir);
 
@@ -100,11 +100,41 @@ async function test() {
 
         const addObsResult = await client.callTool('addObservation', {
             observations: [
-                { entityName: JS, contents: ["广泛用于前端"] }
+                { mode: 'create', entityName: JS, contents: ["广泛用于前端"] }
             ]
         });
         const addObsData = parseToolResult(addObsResult);
         assert(addObsData && !addObsData.error, '4. addObservation 添加观察');
+        const sharedObsId = addObsData?.results?.[0]?.addedObservationIds?.[0];
+
+        // 测试观察复用：通过 observationId 链接到已有观察
+        if (sharedObsId) {
+            const reuseResult = await client.callTool('addObservation', {
+                observations: [
+                    { mode: 'link-single', entityName: REACT, observationId: sharedObsId }
+                ]
+            });
+            const reuseData = parseToolResult(reuseResult);
+            assert(reuseData && !reuseData.error, '5. addObservation 通过 observationId 复用观察');
+            assert(reuseData?.results?.[0]?.linkedObservationIds?.includes(sharedObsId), '6. addObservation 复用返回 linkedObservationIds');
+
+            // 验证 TS 也复用同一个观察
+            const reuseMultiResult = await client.callTool('addObservation', {
+                observations: [
+                    { mode: 'link-multi', entityName: TS, observationIds: [sharedObsId] }
+                ]
+            });
+            const reuseMultiData = parseToolResult(reuseMultiResult);
+            assert(reuseMultiData && !reuseMultiData.error, '7. addObservation 通过 observationIds 批量复用');
+
+            // 验证三个实体都引用了同一个观察
+            const verifyResult = await client.callTool('readNode', { names: [JS, TS, REACT] });
+            const verifyData = parseToolResult(verifyResult);
+            const jsHas = verifyData?.entities?.find(e => e.name === JS)?.observationIds?.includes(sharedObsId);
+            const tsHas = verifyData?.entities?.find(e => e.name === TS)?.observationIds?.includes(sharedObsId);
+            const reactHas = verifyData?.entities?.find(e => e.name === REACT)?.observationIds?.includes(sharedObsId);
+            assert(jsHas && tsHas && reactHas, '8. addObservation 复用验证：三个实体都引用同一观察');
+        }
 
         // ============================================================
         // Read 工具组 (6个)
@@ -191,12 +221,12 @@ async function test() {
         const delRelData = parseToolResult(delRelResult);
         assert(delRelData && !delRelData.error, '18. deleteRelation 删除关系');
 
-        const delObsResult = await client.callTool('deleteObservation', {
+        const delObsResult = await client.callTool('unlinkObservation', {
             observationIds: [firstObsId],
             entityNames: [JS]
         });
         const delObsData = parseToolResult(delObsResult);
-        assert(delObsData && !delObsData.error, '19. deleteObservation 解除链接');
+        assert(delObsData && !delObsData.error, '19. unlinkObservation 解除链接');
 
         const orphansResult = await client.callTool('getOrphanObservation', {});
         const orphansData = parseToolResult(orphansResult);

@@ -105,7 +105,7 @@ auto-commit:[createEntity "韦伯"] at [utc:2026-03-28T12:34:56.789Z] [tz:Asia/S
 
 - 写操作返回消息精简，减少 LLM token 消耗
 - 删除操作返回完整数据，便于撤销
-- `deleteObservation` 改为 ID 输入
+- `unlinkObservation` 改为 ID 输入（从 deleteObservation 更名）
 
 ### 辅助工具
 
@@ -202,7 +202,7 @@ flowchart TD
 | ---------------------- | ------------ | ------ |
 | `deleteEntity`         | 删除实体及关联关系    | 移除过时条目 |
 | `deleteRelation`       | 删除特定关系       | 解除关联   |
-| `deleteObservation`    | 解除观察链接（保留观察） | 移除引用   |
+| `unlinkObservation`    | 解除观察链接（保留观察） | 移除引用   |
 | `getOrphanObservation` | 查找孤儿观察       | 发现无效数据 |
 | `recycleObservation`   | 回收并永久删除观察    | 清理无用数据 |
 
