@@ -13,7 +13,7 @@ import { execSync, execFileSync } from 'child_process';
 import { SearchIntegrator } from './src/tfidf/searchIntegrator.js';
 
 // Global constants
-const VERSION = "2.4.12";
+const VERSION = "2.4.15";
 
 // Get user home directory with fallback
 function getHomeDir() {
@@ -771,7 +771,8 @@ export class KnowledgeGraphManager {
                         graph.observations.push({
                             id: newId,
                             content: content,
-                            createdAt: getCurrentTimestamp()
+                            createdAt: getCurrentTimestamp(),
+                            updatedAt: null  // 初始化时没有更新时间
                         });
                         observationIds.push(newId);
                     }
@@ -907,7 +908,8 @@ export class KnowledgeGraphManager {
                         graph.observations.push({
                             id: newId,
                             content: content,
-                            createdAt: getCurrentTimestamp()
+                            createdAt: getCurrentTimestamp(),
+                            updatedAt: null  // 初始化时没有更新时间
                         });
                         entity.observationIds.push(newId);
                         newIds.push(newId);
@@ -1093,7 +1095,7 @@ export class KnowledgeGraphManager {
                     referencedBy: referencingEntities.map(e => e.name)
                 });
 
-                warnings.push(`Skipped observation ${obsId} - still referenced by: ${referencingEntities.map(e => e.name).join(', ')}. Use force=true to force delete.`);
+                warnings.push(`Skipped observation ${obsId} - still referenced by: ${referencingEntities.map(e => e.name).join(', ')}. Use unlinkObservation first.`);
             }
         }
 

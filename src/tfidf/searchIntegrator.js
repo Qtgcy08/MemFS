@@ -64,9 +64,18 @@ export class SearchIntegrator {
     async ensureIndex() {
         if (this.isIndexed) return;
 
+        const startTime = Date.now();
         const graph = await this.manager.loadGraph();
         await this.hybridService.buildIndex(graph.entities, graph.observations);
         this.isIndexed = true;
+        const elapsed = Date.now() - startTime;
+        const indexSize = this.getIndexSize();
+        const indexSizeStr = indexSize >= 1024 * 1024 
+            ? `${(indexSize / (1024 * 1024)).toFixed(2)} MB`
+            : indexSize >= 1024 
+                ? `${(indexSize / 1024).toFixed(2)} KB`
+                : `${indexSize} B`;
+        console.error(`[MCP Server] Index built: ${indexSizeStr} in ${elapsed}ms at ${new Date().toISOString()}`);
     }
 
     /**
@@ -376,10 +385,18 @@ export class SearchIntegrator {
         if (this._rebuildScheduled) return;
         this._rebuildScheduled = true;
         
+        const startTime = Date.now();
         setTimeout(async () => {
             try {
                 await this.ensureIndex();
-                console.error('[MCP Server] Search index rebuilt');
+                const elapsed = Date.now() - startTime;
+                const indexSize = this.getIndexSize();
+                const indexSizeStr = indexSize >= 1024 * 1024 
+                    ? `${(indexSize / (1024 * 1024)).toFixed(2)} MB`
+                    : indexSize >= 1024 
+                        ? `${(indexSize / 1024).toFixed(2)} KB`
+                        : `${indexSize} B`;
+                console.error(`[MCP Server] Index rebuilt: ${indexSizeStr} in ${elapsed}ms at ${new Date().toISOString()}`);
             } catch (e) {
                 console.error('[MCP Server] Index rebuild failed:', e.message);
             } finally {
