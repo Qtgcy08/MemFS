@@ -6,6 +6,16 @@
 import { HybridSearchService } from './hybridSearchService.js';
 import { TraditionalSearcher } from './traditionalSearch.js';
 
+function formatIndexSize(sizeBytes) {
+    if (sizeBytes >= 1024 * 1024) {
+        return `${(sizeBytes / (1024 * 1024)).toFixed(2)} MB`;
+    }
+    if (sizeBytes >= 1024) {
+        return `${(sizeBytes / 1024).toFixed(2)} KB`;
+    }
+    return `${sizeBytes} B`;
+}
+
 /**
  * Format timestamp object to string for API response
  * Input: {utc: "ISO8601", timezone: "IANA"} or string or null
@@ -60,8 +70,9 @@ export class SearchIntegrator {
 
     /**
      * Ensure index is built
+     * @param {string} label - Label for log message (default: 'Index built')
      */
-    async ensureIndex() {
+    async ensureIndex(label = 'Index built') {
         if (this.isIndexed) return;
 
         const startTime = Date.now();
@@ -69,13 +80,8 @@ export class SearchIntegrator {
         await this.hybridService.buildIndex(graph.entities, graph.observations);
         this.isIndexed = true;
         const elapsed = Date.now() - startTime;
-        const indexSize = this.getIndexSize();
-        const indexSizeStr = indexSize >= 1024 * 1024 
-            ? `${(indexSize / (1024 * 1024)).toFixed(2)} MB`
-            : indexSize >= 1024 
-                ? `${(indexSize / 1024).toFixed(2)} KB`
-                : `${indexSize} B`;
-        console.error(`[MCP Server] Index built: ${indexSizeStr} in ${elapsed}ms at ${new Date().toISOString()}`);
+        const indexSizeStr = formatIndexSize(this.getIndexSize());
+        console.error(`[MCP Server] ${label}: ${indexSizeStr} in ${elapsed}ms at ${new Date().toISOString()}`);
     }
 
     /**
@@ -385,18 +391,11 @@ export class SearchIntegrator {
         if (this._rebuildScheduled) return;
         this._rebuildScheduled = true;
         
-        const startTime = Date.now();
         setTimeout(async () => {
             try {
-                await this.ensureIndex();
-                const elapsed = Date.now() - startTime;
-                const indexSize = this.getIndexSize();
-                const indexSizeStr = indexSize >= 1024 * 1024 
-                    ? `${(indexSize / (1024 * 1024)).toFixed(2)} MB`
-                    : indexSize >= 1024 
-                        ? `${(indexSize / 1024).toFixed(2)} KB`
-                        : `${indexSize} B`;
-                console.error(`[MCP Server] Index rebuilt: ${indexSizeStr} in ${elapsed}ms at ${new Date().toISOString()}`);
+                // ensureIndex logs 'Index rebuilt' when label is passed
+                // If already indexed (e.g. by a concurrent searchNode call), returns silently
+                await this.ensureIndex('Index rebuilt');
             } catch (e) {
                 console.error('[MCP Server] Index rebuild failed:', e.message);
             } finally {

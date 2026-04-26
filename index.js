@@ -13,7 +13,7 @@ import { execSync, execFileSync } from 'child_process';
 import { SearchIntegrator } from './src/tfidf/searchIntegrator.js';
 
 // Global constants
-const VERSION = "2.4.15";
+const VERSION = "2.4.16";
 
 // Get user home directory with fallback
 function getHomeDir() {
