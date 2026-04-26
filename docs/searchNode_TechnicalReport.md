@@ -214,7 +214,54 @@ buildIndex(entities, observations) {
 }
 ```
 
-### 4.3 BM25 得分计算
+### 4.3 观察正文索引与查询的差异
+
+观察正文（observation content）是搜索的主要目标。索引端和查询端对正文的处理存在关键差异：
+
+**索引端 `tokenizeForIndex()`**：对全文直接 n-gram，**不按空格分词**。
+
+```javascript
+function tokenizeForIndex(text) {
+    const cleaned = cleanText(text);  // 去标点、压缩空格
+    const tokens = new Set();
+    tokens.add(cleaned);              // 全文兜底
+
+    // 对全文直接增量 n-gram（不按空格拆分）
+    if (cleaned.length >= 3) generateNGram(cleaned, 2).forEach(g => tokens.add(g));
+    if (cleaned.length >= 4) generateNGram(cleaned, 3).forEach(g => tokens.add(g));
+    if (cleaned.length >= 5) generateNGram(cleaned, 4).forEach(g => tokens.add(g));
+
+    return Array.from(tokens).filter(t => t.length >= 2);
+}
+```
+
+**查询端 `tokenizeQuery()`**：先按空格切分 whitespace tokens，再对每个 token 分别 n-gram。
+
+```javascript
+// 查询端先按空格分词
+const whitespaceTokens = cleaned.split(/\s+/).filter(t => t.length > 0);
+whitespaceTokens.forEach(token => {
+    // 再对每个 token 增量 n-gram
+    if (token.length >= 3) generateNGram(token, 2).forEach(g => tokens.add(g));
+    if (token.length >= 4) generateNGram(token, 3).forEach(g => tokens.add(g));
+    if (token.length >= 5) generateNGram(token, 4).forEach(g => tokens.add(g));
+});
+```
+
+**设计意图**：
+
+| | 索引端 | 查询端 |
+|--|--------|--------|
+| 空格处理 | 不拆分，全文 n-gram | 先按空格拆分 |
+| 目的 | 覆盖跨词 n-gram 匹配 | 减少噪声，保留词组边界 |
+| 中文表现 | 能匹配跨词边界的中文字符序列 | 按语义单元查询 |
+| 英文表现 | 产生较多噪声（如 "Graph" 的 "ra"、"ap" 匹配不相关词汇） | 按单词查询更自然 |
+
+例如存储 `"Knowledge Graph Management"`，索引端会生成 `Kn`、`no`、`ow`、`wle`... 等跨越词边界的 2-gram；查询 `"Graph"` 时查询端对这个单词生成 `Gr`、`ra`、`ap`、`ph`、`Gra`...，BM25 的 IDF 机制会压制高频通用 gram（如 `ra`、`ap`），保留有区分度的 gram。
+
+**中文的优势**：中文单字即语义单位，全文 n-gram 不存在"跨词边界"的问题（中文本身无空格），n-gram 自然覆盖语义连续区域。这也是《苦涩的教训》的体现 — 通用 n-gram 方案对中文"恰好好用"，无需语言学知识。
+
+### 4.4 BM25 得分计算
 
 ```javascript
 _bm25(token, docId) {
