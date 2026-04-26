@@ -62,15 +62,23 @@
 
 ### 2.3 阶段三：完整时间元数据结构（当前实现）
 
+新建观察（无更新历史）：
+
 ```jsonl
-{"type":"observation","id":1,"content":"研究笔记","createdAt":{"utc":"2026-02-08T13:53:07Z","timezone":"Asia/Shanghai"},"updatedAt":{"utc":"2026-02-09T15:30:00Z","timezone":"Asia/Shanghai"}}
+{"type":"observation","id":1,"content":"研究笔记","createdAt":{"utc":"2026-02-08T13:53:07Z","timezone":"Asia/Shanghai"},"updatedAt":null}
+```
+
+更新过的观察（Copy-on-Write 后）：
+
+```jsonl
+{"type":"observation","id":2,"content":"研究笔记（修订版）","createdAt":{"utc":"2026-02-08T13:53:07Z","timezone":"Asia/Shanghai"},"updatedAt":{"utc":"2026-02-09T15:30:00Z","timezone":"Asia/Shanghai"}}
 ```
 
 **核心设计**：
 
 - **UTC 时间**：精确的绝对时间参照，用于时间比对和排序
 - **IANA 时区**：精确的地理位置标识，区分同一偏移量下的不同地区
-- **updatedAt 字段**：支持知识演化的全生命周期追踪
+- **updatedAt 字段**：支持知识演化的全生命周期追踪，新建观察时默认为 `null`，更新后设为更新时间戳
 
 ---
 
@@ -121,7 +129,7 @@
 
 ### 3.3 为什么引入 updatedAt 字段
 
-**决策**：在 Copy-on-Write 机制中同时记录 createdAt 和 updatedAt
+**决策**：在 Copy-on-Write 机制中同时记录 createdAt 和 updatedAt，新建观察时 updatedAt 默认为 null
 
 **理由**：
 
@@ -131,11 +139,14 @@
 
 3. **协作场景**：多用户编辑时，updatedAt 帮助识别最新贡献
 
+4. **Schema 一致性**：所有观察均包含 updatedAt 字段，新观察设为 null，更新后填充时间戳 — 避免字段缺失导致 schema 验证错误
+
 ```javascript
 // 新观察（首次创建）
 {
     "utc": "2026-02-08T13:53:07Z",
-    "timezone": "Asia/Shanghai"
+    "timezone": "Asia/Shanghai",
+    "updatedAt": null                        // 新建时无更新历史
 }
 
 // 已有观察（Copy-on-Write 更新后）

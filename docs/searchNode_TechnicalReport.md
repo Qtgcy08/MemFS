@@ -350,21 +350,43 @@ graph.relations.forEach(r => {
 
 ### 8.2 内部调试信息
 
+混合搜索模式 (`basicFetch=false`) 的 `_meta`:
+
 ```javascript
 _meta: {
-    basicFetch: boolean,
+    query: string,                   // 原始查询字符串
+    fullQuery: string,               // 清洗后的完整查询
+    terms: string[],                 // gram tokens
+    totalCandidates: number,         // 候选实体总数
+    returnedCount: number,           // 返回的直接匹配实体数
+    relatedEntitiesCount: number,    // 关联实体数（通过关系连接）
+    bm25Weight: number,              // BM25 权重（默认 0.7）
+    fuzzyWeight: number,             // 模糊搜索权重（默认 0.3）
+    minScore: number,                // 实际使用的最小得分阈值
+    limit: number,                   // 最大返回实体数
+    indexStatus: 'ready' | 'rebuilding',  // 索引状态
+    rebuildScheduled: boolean,       // 是否有重建任务待处理
+    timestamp: string,               // 搜索执行时间
+    tokenization: [{                 // 每 token 的搜索统计
+        term: string,
+        isFullQuery: boolean,
+        tfidfCount: number,
+        fuseCount: number
+    }]
+}
+```
+
+传统搜索模式 (`basicFetch=true`) 的 `_meta`:
+
+```javascript
+_meta: {
+    searchMode: 'traditional',       // 标识当前模式
     totalCandidates: number,
     returnedCount: number,
     relatedEntitiesCount: number,
     bm25Weight: number,
     fuzzyWeight: number,
-    timestamp: string,
-    debug: {
-        terms: string[],           // gram tokens
-        tokenizationDetails: [     // 每 token 的搜索统计
-            { term, isFullQuery, tfidfCount, fuseCount }
-        ]
-    }
+    timestamp: string
 }
 ```
 
