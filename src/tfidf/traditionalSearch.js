@@ -139,7 +139,8 @@ export class TraditionalSearcher {
                 return obs ? {
                     id: obs.id,
                     content: obs.content,
-                    createdAt: time ? formatTimestampForApi(obs.createdAt) : null
+                    createdAt: time ? formatTimestampForApi(obs.createdAt) : null,
+                    updatedAt: time ? formatTimestampForApi(obs.updatedAt) : null
                 } : null;
             })
             .filter(o => o !== null);
@@ -218,7 +219,8 @@ export class TraditionalSearcher {
                 return obs ? {
                     id: obs.id,
                     content: obs.content,
-                    createdAt: time ? formatTimestampForApi(obs.createdAt) : null
+                    createdAt: time ? formatTimestampForApi(obs.createdAt) : null,
+                    updatedAt: time ? formatTimestampForApi(obs.updatedAt) : null
                 } : null;
             })
             .filter(o => o !== null);
