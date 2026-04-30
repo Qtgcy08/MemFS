@@ -62,10 +62,10 @@
 
 ### 2.3 阶段三：完整时间元数据结构（当前实现）
 
-新建观察（无更新历史）：
+新建观察（无更新历史，`updatedAt` 字段在存储中省略，API 返回时由数据层补 `null`）：
 
 ```jsonl
-{"type":"observation","id":1,"content":"研究笔记","createdAt":{"utc":"2026-02-08T13:53:07Z","timezone":"Asia/Shanghai"},"updatedAt":null}
+{"type":"observation","id":1,"content":"研究笔记","createdAt":{"utc":"2026-02-08T13:53:07Z","timezone":"Asia/Shanghai"}}
 ```
 
 更新过的观察（Copy-on-Write 后）：
@@ -129,7 +129,7 @@
 
 ### 3.3 为什么引入 updatedAt 字段
 
-**决策**：在 Copy-on-Write 机制中同时记录 createdAt 和 updatedAt，新建观察时 updatedAt 默认为 null
+**决策**：在 Copy-on-Write 机制中同时记录 createdAt 和 updatedAt，新建观察时 updatedAt 在存储中省略（API 返回时补 null）
 
 **理由**：
 
@@ -141,44 +141,34 @@
 
 4. **Schema 一致性**：所有观察均包含 updatedAt 字段，新观察设为 null，更新后填充时间戳 — 避免字段缺失导致 schema 验证错误
 
-```javascript
-// 新观察（首次创建）
-{
-    "utc": "2026-02-08T13:53:07Z",
-    "timezone": "Asia/Shanghai",
-    "updatedAt": null                        // 新建时无更新历史
-}
+```jsonl
+// 新观察（首次创建，无 updatedAt）
+{"type":"observation","id":1,"content":"研究笔记","createdAt":{"utc":"2026-02-08T13:53:07Z","timezone":"Asia/Shanghai"}}
 
-// 已有观察（Copy-on-Write 更新后）
-{
-    "utc": "2026-02-08T13:53:07Z",           // 创建时间（继承）
-    "timezone": "Asia/Shanghai",
-    "updatedAt": {
-        "utc": "2026-02-09T15:30:00Z",      // 更新时间（新创建）
-        "timezone": "Asia/Shanghai"
-    }
-}
+// 已有观察（Copy-on-Write 更新后，createdAt 与 updatedAt 平级）
+{"type":"observation","id":2,"content":"研究笔记（修订版）","createdAt":{"utc":"2026-02-08T13:53:07Z","timezone":"Asia/Shanghai"},"updatedAt":{"utc":"2026-02-09T15:30:00Z","timezone":"Asia/Shanghai"}}
 ```
 
 ### 3.4 为什么要明确区分 createdAt 和 updatedAt
 
-**决策**：API 返回的时间值需要标注其类型（`createdAt` 或 `updatedAt`）
-
-**实现**：`formatTimestamp` 函数返回 `{ value, type }` 结构
+**决策**：观察的 API 返回中 `createdAt` 和 `updatedAt` 作为平级字符串字段直接展示，由 `formatObservations()` 统一处理。
 
 ```javascript
-// formatTimestamp 返回值示例
-formatTimestamp({utc, timezone, updatedAt})
-// → { value: "2026-02-09 22:02:06 Asia/Shanghai", type: "updatedAt" }
-
-formatTimestamp({utc, timezone})
-// → { value: "2026-02-09 22:02:06 Asia/Shanghai", type: "createdAt" }
+// API 返回的观察对象格式
+{
+    id: 1,
+    content: "研究笔记",
+    createdAt: "2026-02-09 22:02:06 Asia/Shanghai",
+    updatedAt: null
+}
 ```
+
+`formatTimestamp` 函数（返回 `{ value, type }` 结构）仅用于搜索结果的 `_meta.timestamp` 等非观察字段。
 
 **理由**：
 
-1. **语义清晰**：LLM明确知道当前值是创建时间还是更新时间
-2. **混合格式处理**：当 createdAt 使用旧格式字符串而 updatedAt 使用新格式对象时，仍能正确区分
+1. **语义清晰**：字段名 `createdAt`/`updatedAt` 直接表达含义，无需嵌套
+2. **分层处理**：`formatObservations()` 统一格式化观察数组，`formatTimestamp()` 处理元数据时间戳
 
 ### 3.5 为什么保持向后兼容
 
@@ -208,7 +198,7 @@ formatTimestamp({utc, timezone})
 | `getCurrentTimestamp()`        | 创建存储用时间戳     | `{utc, timezone}`                |
 | `formatWithTimezone()`         | UTC 转换为本地时间  | `"YYYY-MM-DD HH:mm:ss Timezone"` |
 | `formatTimestamp()`            | API 时间格式化    | `{value, type}`                  |
-| `formatObservationTimestamp()` | 观察时间格式化      | `{createdAt, updatedAt}`         |
+| `formatObservationTimestamp()` | ~~观察时间格式化~~（历史遗留，当前由 `formatObservations()` 替代） | ~~`{createdAt, updatedAt}`~~ |
 
 ### 4.2 代码示例
 
@@ -259,13 +249,11 @@ function formatTimestamp(data) {
 
 ### 4.3 时间格式对比表
 
-| 场景            | 输入格式                         | 输出格式                                                |
-| ------------- | ---------------------------- | --------------------------------------------------- |
-| 新观察创建         | `getCurrentTimestamp()`      | `{utc, timezone}`                                   |
-| Copy-on-Write | 旧观察 + 新内容                    | `{utc, timezone, updatedAt: {utc, timezone}}`       |
-| API 响应（新格式）   | `{utc, timezone}`            | `"2026-02-09 22:02:06 Asia/Shanghai"`               |
-| API 响应（有更新）   | `{utc, timezone, updatedAt}` | `"2026-02-09 22:02:06 Asia/Shanghai"`（返回 updatedAt） |
-| API 响应（旧格式）   | `"2026-02-08T08:18:30.317Z"` | `"2026-02-08T08:18:30.317Z"`                        |
+| 场景 | 存储格式 | API 返回格式 |
+|------|----------|-------------|
+| 新观察创建 | `createdAt: {utc, timezone}` | `createdAt: "2026-02-09 22:02:06 Asia/Shanghai"`<br>`updatedAt: null` |
+| Copy-on-Write 更新 | `createdAt: {utc, timezone}`<br>`updatedAt: {utc, timezone}`（平级） | `createdAt: "2026-02-08 21:53:07 Asia/Shanghai"`<br>`updatedAt: "2026-02-09 23:30:00 Asia/Shanghai"` |
+| 旧格式字符串 | `createdAt: "2026-02-08T08:18:30.317Z"` | `createdAt: "2026-02-08T08:18:30.317Z"`<br>`updatedAt: null` |
 
 > **持久化层面**：数据保存到 JSONL 文件时，`{utc, timezone}` 对象通过 `JSON.stringify()` 存储为：
 > ```json

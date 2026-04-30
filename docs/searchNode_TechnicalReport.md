@@ -120,6 +120,22 @@ function tokenizeQuery(query) {
 }
 ```
 
+**查询按空格拆分**：`tokenizeQuery()` 先按空格切分查询为多个 whitespace tokens，再对每个 token 分别生成 n-gram。这意味着：
+
+- 多关键词查询（如 `"韦伯 涂尔干"`）会被拆分为 `"韦伯"` + `"涂尔干"` 分别检索，结果聚合
+- 每个关键词独立过 BM25 和模糊搜索，命中任一关键词的实体都会进入候选
+- 空格相当于 OR 语义：命中关键词越多，加权融合得分越高
+
+```javascript
+// 查询 "功能主义 涂尔干" 的分词过程
+cleanText("功能主义 涂尔干")           // → "功能主义涂尔干"
+whitespaceTokens: ["功能主义", "涂尔干"]
+fullQuery: "功能主义涂尔干"              // 全词兜底
+// 每个 token 独立 n-gram:
+// "功能主义" → "功能主义", "功能", "能主", "主义"
+// "涂尔干"   → "涂尔干", "涂尔", "尔干"
+```
+
 ### 3.3 Gram 惩罚机制
 
 **2-gram 特殊惩罚**：短 bigram 如 "CA" 可能产生假阳性（如 "Technical" 中的 "CA" 匹配 "CACG+" 中的 "CA"），因此 2-gram 单独设置 ×0.5 惩罚。
@@ -352,7 +368,7 @@ graph.relations.forEach(r => {
 | `maxObservationsPerEntity` | 5 | 每个实体最多返回的观察数量 |
 | `bm25Weight` | 0.7 | BM25 搜索的权重系数 |
 | `fuzzyWeight` | 0.3 | 模糊搜索的权重系数 |
-| `minScore` | 0.01 | 最小相关性得分阈值 |
+| `minScore` | 0.1 | 最小相关性得分阈值 |
 
 ### 7.2 数量限制
 
@@ -451,7 +467,7 @@ if (keywords.some(kw => entity.name.toLowerCase().includes(kw.toLowerCase()))) {
 }
 ```
 
-## 十、最近更新 (2026-03)
+## 十、2.4.12 版本更新记录
 
 ### 10.1 Gram Tokenization
 

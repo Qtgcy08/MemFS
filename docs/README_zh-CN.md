@@ -1,4 +1,4 @@
-c:\Users\Qtgcy\.astrbot_launcher\instances\87376e80-3fb7-4eb9-8c89-c05dec434372\core\.venv# 🧠 MemFS
+# 🧠 MemFS
 
 **基于 MCP server-memory 深度重构的知识图谱管理系统**
 
@@ -51,19 +51,6 @@ GITAUTOCOMMIT=true node index.js
 
 ### 配置为 MCP 服务器
 
-**OpenCode 格式：**
-```json
-{
-  "mcpServers": {
-    "memory": {
-      "type": "local",
-      "command": ["npx", "-y", "@qty/memfs"],
-      "enabled": true
-    }
-  }
-}
-```
-
 **VSCode / ClaudeCode / Cherry Studio / AstrBot 格式：**
 ```json
 {
@@ -71,6 +58,19 @@ GITAUTOCOMMIT=true node index.js
     "memory": {
       "command": "npx",
       "args": ["-y", "@qty/memfs"],
+      "enabled": true
+    }
+  }
+}
+```
+
+**OpenCode 格式：**
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "type": "local",
+      "command": ["npx", "-y", "@qty/memfs"],
       "enabled": true
     }
   }
@@ -169,7 +169,7 @@ flowchart TD
 
 ---
 
-## 📦 完整 API 工具清单（16个）
+## 📦 完整 API 工具清单（17个）
 
 ### 创建类
 
@@ -399,7 +399,7 @@ git checkout legacy
 ## 🧪 测试
 
 ```bash
-# 完整测试套件（22个测试）
+# 完整测试套件（25个测试）
 node test_mcp_full.mjs
 
 # Git Sync 测试
@@ -416,7 +416,7 @@ node test_gitsync.mjs
 | **数据共享**      | 不支持    | 硬链接式共享        |
 | **更新机制**      | 直接覆盖   | Copy-on-Write |
 | **检索能力**      | 简单关键词  | BM25 + 模糊搜索 |
-| **孤立检测**      | 理论上不支持孤儿观察      | 支持            |
+| **孤立检测**      | 理论上不存在孤儿观察      | 支持            |
 | **缓存机制**      | 无      | 30秒TTL        |
 | **Windows兼容** | 未知     | 优雅降级          |
 
@@ -437,7 +437,7 @@ node test_gitsync.mjs
 
 - **文件系统智慧借鉴过来**：inode 表、硬链接、写时复制
 - **搜索用 BM25 + 模糊**：轻量、可解释、透明可控
-- **工具化暴露**：16 个 MCP 工具，LLM 按需调用
+- **工具化暴露**：17 个 MCP 工具，LLM 按需调用
 
 **结果？** —— 一个安静、高效、不打扰的知识管理工具。
 
