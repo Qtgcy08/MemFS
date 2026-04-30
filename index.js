@@ -244,21 +244,20 @@ let MEMORY_FILE_PATH;
 // - New format: {utc, timezone} -> converts to local time with IANA timezone
 function formatObservations(observations, includeTime = false) {
     return observations.map(o => {
-        const ts = includeTime ? formatObservationTimestamp(o.createdAt) : { createdAt: null, updatedAt: null };
-        const base = {
-            id: o.id,
-            content: o.content,
-            createdAt: null  // 默认为 null，time=true 时会被覆盖
-        };
+        let createdAt = null, updatedAt = null;
         if (includeTime) {
-            if (ts.updatedAt) {
-                base.updatedAt = ts.updatedAt;
+            if (o.createdAt && typeof o.createdAt === 'object' && o.createdAt.utc) {
+                createdAt = formatWithTimezone(o.createdAt.utc, o.createdAt.timezone);
+            } else if (o.createdAt && typeof o.createdAt === 'string') {
+                createdAt = o.createdAt;
             }
-            if (ts.createdAt) {
-                base.createdAt = ts.createdAt;
+            if (o.updatedAt && typeof o.updatedAt === 'object' && o.updatedAt.utc) {
+                updatedAt = formatWithTimezone(o.updatedAt.utc, o.updatedAt.timezone);
+            } else if (o.updatedAt && typeof o.updatedAt === 'string') {
+                updatedAt = o.updatedAt;
             }
         }
-        return base;
+        return { id: o.id, content: o.content, createdAt, updatedAt };
     });
 }
 
@@ -1261,7 +1260,8 @@ export class KnowledgeGraphManager {
         return orphanObservations.map(obs => ({
             id: obs.id,
             content: obs.content,
-            createdAt: formatTimestamp(obs.createdAt)?.value
+            createdAt: obs.createdAt || null,
+            updatedAt: obs.updatedAt || null
         }));
     }
     async _updateObservationSingle(observationId, newContent) {
@@ -1424,7 +1424,8 @@ export class KnowledgeGraphManager {
                 return obs ? {
                     id: obs.id,
                     content: obs.content,
-                    createdAt: formatTimestamp(obs.createdAt)?.value || null
+                    createdAt: formatTimestamp(obs.createdAt)?.value || null,
+                    updatedAt: formatTimestamp(obs.updatedAt)?.value || null
                 } : null;
             })
             .filter(o => o !== null);
@@ -1517,9 +1518,10 @@ export class KnowledgeGraphManager {
         const cleanObservations = filteredObservations.map(o => ({
             id: o.id,
             content: o.content,
-            createdAt: o.createdAt || null
+            createdAt: o.createdAt || null,
+            updatedAt: o.updatedAt || null
         }));
-        
+
         const filteredGraph = {
             entities: cleanedEntities,
             relations: enrichedRelations,
@@ -1538,7 +1540,8 @@ export class KnowledgeGraphManager {
                 results.push({
                     id: observation.id,
                     content: observation.content,
-                    createdAt: observation.createdAt || null
+                    createdAt: observation.createdAt || null,
+                    updatedAt: observation.updatedAt || null
                 });
             }
         }
@@ -1867,7 +1870,8 @@ server.registerTool("listGraph", {
         observations: z.array(z.object({
             id: z.number(),
             content: z.string(),
-            createdAt: z.string().nullable()
+            createdAt: z.string().nullable(),
+            updatedAt: z.string().nullable()
         })),
         relations: z.array(RelationSchema)
     }
@@ -1974,7 +1978,8 @@ server.registerTool("readNode", {
         observations: z.array(z.object({
             id: z.number(),
             content: z.string(),
-            createdAt: z.string().nullable()
+            createdAt: z.string().nullable(),
+            updatedAt: z.string().nullable()
         }))
     }
 }, async ({ names, time }) => {
@@ -2036,7 +2041,8 @@ server.registerTool("getOrphanObservation", {
         orphanObservations: z.array(z.object({
             id: z.number(),
             content: z.string(),
-            createdAt: z.string().nullable()
+            createdAt: z.string().nullable(),
+            updatedAt: z.string().nullable()
         }))
     }
 }, async ({ time }) => {
@@ -2059,7 +2065,8 @@ server.registerTool("readObservation", {
         observations: z.array(z.object({
             id: z.number(),
             content: z.string(),
-            createdAt: z.string().nullable()
+            createdAt: z.string().nullable(),
+            updatedAt: z.string().nullable()
         }))
     }
 }, async ({ ids, time }) => {
@@ -2069,7 +2076,8 @@ server.registerTool("readObservation", {
     const result = observations.map(o => ({
         id: o.id,
         content: o.content,
-        createdAt: time ? formatTimestamp(o.createdAt)?.value : null
+        createdAt: time ? formatTimestamp(o.createdAt)?.value : null,
+        updatedAt: time ? formatTimestamp(o.updatedAt)?.value : null
     }));
     
     return {
