@@ -309,6 +309,24 @@ await updateNode({
 }
 ```
 
+### 观察所有权转移
+
+`unlinkObservation` + `addObservation`（link 模式）组合可实现观察从原实体转移到目标实体：
+
+```javascript
+// 1. 解除原实体的观察引用（观察本身保留，变为孤儿）
+await unlinkObservation({ observationIds: [1], entityNames: ["张三"] });
+
+// 2. 将同一观察链接到目标实体
+await addObservation({
+    mode: "link-single",
+    entityName: "李四",
+    observationId: 1
+});
+```
+
+这种模式常用于知识归类调整：某条笔记起初归于概念 A，后续研判后认为更应归入概念 B，无需复制数据，只需转移引用。
+
 ---
 
 ## 📁 数据格式
