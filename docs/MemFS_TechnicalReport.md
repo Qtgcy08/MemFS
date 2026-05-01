@@ -237,7 +237,8 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 17 个工具：
    | 文献阅读与笔记 | `createEntity` + `addObservation`                          | 建立概念卡片，添加阅读笔记   |
    | 概念辨析与关联 | `createRelation` + `searchNode`                            | 发现概念间的联系，建立知识网络 |
    | 写作引用与核查 | `readNode`                                                 | 快速查阅引用，确保来源可靠   |
-   | 定期整理与更新 | `updateNode` + `getOrphanObservation`+`recycleObservation` | 修正过时内容，清理冗余笔记   |
+    | 定期整理与更新 | `updateNode` + `getOrphanObservation`+`recycleObservation` | 修正过时内容，清理冗余笔记   |
+| 重新归类笔记 | `unlinkObservation` + `addObservation`(link) | 将观察从原实体转移到另一实体 |
    
 ### 2.5 文件系统设计思想的引入
    
