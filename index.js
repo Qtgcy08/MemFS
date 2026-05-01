@@ -13,7 +13,7 @@ import { execSync, execFileSync } from 'child_process';
 import { SearchIntegrator } from './src/tfidf/searchIntegrator.js';
 
 // Global constants
-const VERSION = "2.4.16";
+const VERSION = "2.4.17";
 
 // Get user home directory with fallback
 function getHomeDir() {
@@ -93,13 +93,10 @@ const gitSync = {
     },
     
     // Log to console buffer (for getConsole tool)
+    // Note: console.error is globally overridden to also push to consoleBuffer,
+    // so we don't need to push here - just call console.error.
     log(level, message) {
-        consoleBuffer.push(`[Git] ${message}`);
-        if (level === 'error') {
-            console.error(`[Git] ${message}`);
-        } else {
-            console.error(`[Git] ${message}`);
-        }
+        console.error(`[Git] ${message}`);
     },
     
     // Execute git command
