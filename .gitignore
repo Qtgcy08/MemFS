@@ -13,3 +13,6 @@ temp/
 .memfs/
 # Skills
 skills/*.zip
+# Generated graph exports
+graph.png
+graph.svg
