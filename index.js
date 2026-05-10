@@ -1603,10 +1603,11 @@ server.registerTool("getConsole", {
     title: "Get Console",
     description: "Retrieve buffered server logs and recent git commits.",
     inputSchema: {
+        logs: z.number().optional().default(20).describe("Number of recent git commits to show (only when GITAUTOCOMMIT is enabled)"),
         easterEgg: z.boolean().optional().default(false).describe("Easter egg activated")
     },
     outputSchema: {}
-}, async ({ easterEgg }) => {
+}, async ({ logs, easterEgg }) => {
     const lines = [];
     
     // Add buffered messages
@@ -1617,7 +1618,8 @@ server.registerTool("getConsole", {
     // Get recent git log if git sync is enabled and initialized
     if (gitSync.isEnabled() && gitSync.initialized) {
         // Format: %h %an <%ae> %s (short hash, author name, email, subject)
-        const logResult = await gitSync.execGit(['log', '--format=%h %an <%ae> %s', '-10'], gitSync.memoryDir);
+        const logCount = Math.min(Math.max(1, logs || 20), 100);
+        const logResult = await gitSync.execGit(['log', `--format=%h %an <%ae> %s`, `-${logCount}`], gitSync.memoryDir);
         if (logResult.success) {
             const commits = logResult.output.trim().split('\n');
             for (const commit of commits) {
@@ -1626,6 +1628,24 @@ server.registerTool("getConsole", {
         }
     }
     
+    // Add current stats
+    try {
+        const graph = await knowledgeGraphManager.loadGraph();
+        const nowEntityCount = graph.entities.length;
+        const nowObservationCount = graph.observations.length;
+        const nowRelationCount = graph.relations.length;
+        const nowIndexSize = searchIntegrator.getIndexSize();
+        const nowIndexSizeStr = nowIndexSize >= 1024 * 1024
+            ? `${(nowIndexSize / (1024 * 1024)).toFixed(2)} MB`
+            : nowIndexSize >= 1024
+                ? `${(nowIndexSize / 1024).toFixed(2)} KB`
+                : `${nowIndexSize} B`;
+        lines.push('');
+        lines.push(`[Stats] now at [utc:${new Date().toISOString()}] ${nowEntityCount} entities | ${nowObservationCount} observations | ${nowRelationCount} relations | index ${nowIndexSizeStr}`);
+    } catch (e) {
+        // best effort
+    }
+
     // Easter egg for 乐正绫's 11th birthday
     if (easterEgg) {
         lines.push('');
@@ -2237,8 +2257,9 @@ async function main() {
     
     const transport = new StdioServerTransport();
     await server.connect(transport);
+    const startupUtc = new Date().toISOString();
     console.error(`[MCP Server] MemFS v${VERSION} running on stdio`);
-    console.error(`[Stats] ${entityCount} entities | ${observationCount} observations | ${relationCount} relations | last updated ${lastUpdated}`);
+    console.error(`[Stats] over startup at [utc:${startupUtc}] ${entityCount} entities | ${observationCount} observations | ${relationCount} relations | last updated ${lastUpdated}`);
     console.error(`[Stats] Index size: ${indexSizeStr}`);
 }
 main().catch((error) => {
