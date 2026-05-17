@@ -13,7 +13,7 @@ import { execSync, execFileSync } from 'child_process';
 import { SearchIntegrator } from './src/tfidf/searchIntegrator.js';
 
 // Global constants
-const VERSION = "2.4.18";
+const VERSION = "2.5.21";
 
 // Get user home directory with fallback
 function getHomeDir() {
@@ -1641,7 +1641,7 @@ server.registerTool("getConsole", {
                 ? `${(nowIndexSize / 1024).toFixed(2)} KB`
                 : `${nowIndexSize} B`;
         lines.push('');
-        lines.push(`[Stats] now at [utc:${new Date().toISOString()}] ${nowEntityCount} entities | ${nowObservationCount} observations | ${nowRelationCount} relations | index ${nowIndexSizeStr}`);
+        lines.push(`[Stats] ${nowEntityCount} entities | ${nowObservationCount} observations | ${nowRelationCount} relations | index ${nowIndexSizeStr} | now at [utc:${new Date().toISOString()}]`);
     } catch (e) {
         // best effort
     }
@@ -2094,7 +2094,7 @@ server.registerTool("readObservation", {
         id: o.id,
         content: o.content,
         createdAt: time ? formatTimestamp(o.createdAt)?.value : null,
-        updatedAt: time ? formatTimestamp(o.updatedAt)?.value : null
+        updatedAt: time ? (formatTimestamp(o.updatedAt)?.value ?? null) : null
     }));
     
     return {
@@ -2259,7 +2259,7 @@ async function main() {
     await server.connect(transport);
     const startupUtc = new Date().toISOString();
     console.error(`[MCP Server] MemFS v${VERSION} running on stdio`);
-    console.error(`[Stats] over startup at [utc:${startupUtc}] ${entityCount} entities | ${observationCount} observations | ${relationCount} relations | last updated ${lastUpdated}`);
+    console.error(`[Stats] ${entityCount} entities | ${observationCount} observations | ${relationCount} relations | last updated ${lastUpdated} | over startup at [utc:${startupUtc}]`);
     console.error(`[Stats] Index size: ${indexSizeStr}`);
 }
 main().catch((error) => {
