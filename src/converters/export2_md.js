@@ -239,11 +239,11 @@ for (let i = 0; i < entities.length; i++) {
             }
             md += line + '\n';
         }
-        // Check if shared with other entities
         const sharing = findSharingEntities(obs.id, e.name);
         if (sharing.length > 0) {
             md += `linkedWith: ${sharing.map(s => `[${s}]`).join(', ')}\n`;
         }
+        md += '\n';
     });
 
     // Relations for this entity
@@ -260,6 +260,7 @@ for (let i = 0; i < entities.length; i++) {
                 const toTag = toSerial ? `[${toSerial}]` : '[?]';
                 md += `${r.relationType} "${r.to}"${toTag}\n`;
             }
+            md += '\n';
         });
     }
 }
