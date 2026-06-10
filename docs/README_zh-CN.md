@@ -354,7 +354,6 @@ await addObservation({
 | 变量              | 说明                    | 默认值              | 状态   |
 | --------------- | --------------------- | ---------------- | ---- |
 | `MEMORY_DIR`    | 数据存储目录                | `~/.memory`      | ✅ 推荐 |
-| `MEMORY_FILE_PATH` | 完整文件路径（已废弃）        | `~/.memory/memory.jsonl` | ⚠️ 废弃 |
 | `GITAUTOCOMMIT` | 启用 Git 自动提交（每次保存自动提交） | `false` | ✅ 推荐 |
 
 ---
@@ -410,7 +409,6 @@ cd MemFS
 git checkout legacy
 ```
 
-如果您正在使用 `MEMORY_FILE_PATH`，请在升级前迁移到 `MEMORY_DIR`。
 
 ---
 

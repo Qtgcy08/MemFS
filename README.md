@@ -6,14 +6,13 @@
 > Inspired by it, though heavily reimagined.
 
 [![Node.js 22+](https://img.shields.io/badge/node-22+-green?style=for-the-badge&logo=node.js)](https://nodejs.org)
+[![中文文档](https://img.shields.io/badge/📖_中文文档-docs%2FREADME__zh--CN.md-blue?style=for-the-badge)](./docs/README_zh-CN.md)
 
 ---
 
 ## 🎯 One-Line Description
 
 **Bringing modern filesystem concepts to knowledge graph management, combined with BM25 + fuzzy search for intelligent retrieval, designed for LLM-assisted humanities and social sciences research.**
-
-> 📖 **中文版文档**: [docs/README_zh-CN.md](./docs/README_zh-CN.md)
 
 ---
 
@@ -338,7 +337,6 @@ await updateNode({
 | Variable | Description | Default | Status |
 |----------|-------------|---------|--------|
 | `MEMORY_DIR` | Data storage directory | `~/.memory` | ✅ Recommended |
-| `MEMORY_FILE_PATH` | Full file path (deprecated) | `~/.memory/memory.jsonl` | ⚠️ Deprecated |
 | `GITAUTOCOMMIT` | Enable Git auto-commit on every save | `false` | ✅ Recommended |
 
 ---
@@ -403,7 +401,6 @@ cd MemFS
 git checkout legacy
 ```
 
-If you're using `MEMORY_FILE_PATH`, please migrate to `MEMORY_DIR` before upgrading.
 
 ---
 

@@ -20,7 +20,7 @@ async function initManager() {
     if (manager) return { manager, searchIntegrator };
     
     const memoryPath = process.env.MEMORY_DIR 
-        ? path.join(process.env.MEMORY_DIR, 'memory.jsonl')
+        ? path.join(path.resolve(process.env.MEMORY_DIR), 'memory.jsonl')
         : undefined;
     
     const result = await createManagers({ memoryPath });

@@ -84,17 +84,6 @@ export async function ensureMemoryFilePath() {
             : path.join(getHomeDir(), process.env.MEMORY_DIR);
         return path.join(customDir, 'memory.jsonl');
     }
-    // Check for custom file path via MEMORY_FILE_PATH environment variable (DEPRECATED)
-    if (process.env.MEMORY_FILE_PATH) {
-        console.error('[Deprecation Warning] MEMORY_FILE_PATH is deprecated and will be removed in v2.0.');
-        console.error('[Deprecation Warning] Please migrate to MEMORY_DIR instead. Example:');
-        console.error('[Deprecation Warning]   1. Rename your memory file to memory.jsonl');
-        console.error('[Deprecation Warning]   2. Move it to a dedicated folder');
-        console.error('[Deprecation Warning]   3. Use: MEMORY_DIR=/path/to/folder node index.js');
-        return path.isAbsolute(process.env.MEMORY_FILE_PATH)
-            ? process.env.MEMORY_FILE_PATH
-            : path.join(path.dirname(fileURLToPath(import.meta.url)), process.env.MEMORY_FILE_PATH);
-    }
     // No custom path set, check for backward compatibility migration
     const oldMemoryPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'memory.json');
     const newMemoryPath = defaultMemoryPath;
@@ -276,7 +265,6 @@ const gitSync = {
 };
 
 // Initialize memory file path (will be set during startup)
-let MEMORY_FILE_PATH;
 // Helper function to format observations - conditionally include createdAt
 // Handles multiple timestamp formats:
 // - UTC ISO: "2026-02-08T08:18:30.317Z" -> returns as-is
@@ -1714,7 +1702,7 @@ server.registerTool("getConsole", {
     
     return {
         content: [{ type: "text", text: lines.join('\n') }],
-        structuredContent: {}
+        jsonContent: {}
     };
 });
 // Register create_entities tool
@@ -1728,7 +1716,7 @@ server.registerTool("createEntity", {
     const result = await knowledgeGraphManager.createEntity(entities);
     return {
         content: [{ type: "text", text: result.message }],
-        structuredContent: { 
+        jsonContent: { 
             entities: result.newEntities,
             skipped: result.skippedEntities
         }
@@ -1745,7 +1733,7 @@ server.registerTool("createRelation", {
     const result = await knowledgeGraphManager.createRelation(relations);
     return {
         content: [{ type: "text", text: `Created ${result.length} relations` }],
-        structuredContent: { relations: result }
+        jsonContent: { relations: result }
     };
 });
 // Register add_observations tool
@@ -1783,7 +1771,7 @@ server.registerTool("createRelation", {
     if (allLinkedIds.length > 0) msgParts.push(`linked IDs: [${allLinkedIds.join(', ')}]`);
     return {
         content: [{ type: "text", text: `Added observations to ${result.length} entities, ${msgParts.join(', ')}` }],
-        structuredContent: { results: result }
+        jsonContent: { results: result }
     };
  });
 // Register delete_entities tool
@@ -1798,7 +1786,7 @@ server.registerTool("deleteEntity", {
     const names = result.deletedEntities.map(e => e.name).join(', ');
     return {
         content: [{ type: "text", text: `Deleted entities: ${names}` }],
-        structuredContent: { 
+        jsonContent: { 
             success: true, 
             message: `Deleted entities: ${names}`,
             deletedEntities: result.deletedEntities,
@@ -1823,7 +1811,7 @@ server.registerTool("unlinkObservation", {
         : "";
     return {
         content: [{ type: "text", text: `Unlinked observations: [${unlinkedIds.join(', ')}]${warningText ? ' ' + warningText : ''}` }],
-        structuredContent: result
+        jsonContent: result
     };
 });
 // Register delete_relations tool
@@ -1837,7 +1825,7 @@ server.registerTool("deleteRelation", {
     await knowledgeGraphManager.deleteRelation(relations);
     return {
         content: [{ type: "text", text: `Deleted ${relations.length} relations` }],
-        structuredContent: { success: true, message: `Deleted ${relations.length} relations` }
+        jsonContent: { success: true, message: `Deleted ${relations.length} relations` }
     };
 });
 // Register recycle_observation tool
@@ -1855,7 +1843,7 @@ server.registerTool("recycleObservation", {
         : "";
     return {
         content: [{ type: "text", text: `Recycled ${result.deleted.length} observation(s), skipped ${result.skipped.length}. ${warningText}` }],
-        structuredContent: result
+        jsonContent: result
     };
 });
 // Register read_graph tool
@@ -1886,7 +1874,7 @@ server.registerTool("listGraph", {
     
     return {
         content: [{ type: "text", text: JSON.stringify(cleanGraph, null, 2) }],
-        structuredContent: cleanGraph
+        jsonContent: cleanGraph
     };
 });
 // Register search_nodes tool
@@ -1929,7 +1917,7 @@ server.registerTool("searchNode", {
 
     return {
         content: [{ type: "text", text: JSON.stringify(limitedResult, null, 2) }],
-        structuredContent: limitedResult
+        jsonContent: limitedResult
     };
 });
 // Register open_nodes tool
@@ -1949,7 +1937,7 @@ server.registerTool("readNode", {
     };
     return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-        structuredContent: result
+        jsonContent: result
     };
 });
 // Register updateNode tool
@@ -1973,7 +1961,7 @@ server.registerTool("updateNode", {
     const updatedNames = results.map(r => r.entityName).join(', ');
     return {
         content: [{ type: "text", text: `Updated ${results.length} entities: ${updatedNames}` }],
-        structuredContent: { results }
+        jsonContent: { results }
     };
 });
 // Register orphan_observations tool
@@ -1988,7 +1976,7 @@ server.registerTool("getOrphanObservation", {
     const result = formatObservations(orphanObservations, time);
     return {
         content: [{ type: "text", text: JSON.stringify({ orphanObservations: result }, null, 2) }],
-        structuredContent: { orphanObservations: result }
+        jsonContent: { orphanObservations: result }
     };
 });
 // Register read_observations tool
@@ -2012,7 +2000,7 @@ server.registerTool("readObservation", {
     
     return {
         content: [{ type: "text", text: JSON.stringify({ observations: result }, null, 2) }],
-        structuredContent: { observations: result }
+        jsonContent: { observations: result }
     };
 });
 // Register update_observations tool (batch)
@@ -2047,7 +2035,7 @@ server.registerTool("updateObservation", {
     const updatedIds = formattedResults.map(r => r.observationId).join(', ');
     return {
         content: [{ type: "text", text: `Updated observations: [${updatedIds}]` }],
-        structuredContent: { results: formattedResults }
+        jsonContent: { results: formattedResults }
     };
 });
 // Register read_nodes tool
@@ -2059,7 +2047,7 @@ server.registerTool("listNode", {
     const nodes = await knowledgeGraphManager.listNode();
     return {
         content: [{ type: "text", text: JSON.stringify(nodes) }],
-        structuredContent: { nodes }
+        jsonContent: { nodes }
     };
 });
 // Register howWork tool
@@ -2071,7 +2059,7 @@ server.registerTool("howWork", {
     const workflow = await knowledgeGraphManager.howWork();
     return {
         content: [{ type: "text", text: workflow }],
-        structuredContent: { workflow }
+        jsonContent: { workflow }
     };
 });
 /**

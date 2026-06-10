@@ -198,5 +198,36 @@ license: Apache-2.0
 | 读取详情 | `readNode` |
 | 更新内容 | `updateNode` `updateObservation` `addObservation`|
 
+---
+
+## 九、附件管理
+
+### 9.1 存储位置
+
+在 `MEM_DIR` 下新建 `assets/` 文件夹存放所有附件。
+
+### 9.2 引用方式
+
+在 observation 或 definition 中使用 Markdown 引用语法：
+
 ```
+[描述文本](assets/filename.ext)
+```
+
+### 9.3 多模态附件
+
+使用 Git LFS 管理二进制附件：
+
+```bash
+git lfs track "assets/**"
+```
+
+### 9.4 注意事项
+
+- 附件路径使用相对路径（相对 `MEM_DIR`）
+- 附件本身不写入 `memory.jsonl`，只写入引用链接
+- git commit 前确保 Git LFS 已配置
+- AI 不负责直接读写附件文件，仅维护引用路径
+
+---
 

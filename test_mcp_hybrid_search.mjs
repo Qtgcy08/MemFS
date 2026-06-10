@@ -54,7 +54,7 @@ async function test() {
     const memoryPath = path.join(__dirname, '.test_mcp_hybrid_' + timestamp + '.jsonl');
     
     const client = createMCPClient({
-        MEMORY_FILE_PATH: memoryPath
+        MEMORY_DIR: memoryPath
     });
 
     console.log('🧪 MCP 混合搜索测试\n');
