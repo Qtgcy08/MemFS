@@ -17,6 +17,20 @@ import { SearchIntegrator } from './src/tfidf/searchIntegrator.js';
 // Global constants
 const VERSION = "2.5.21";
 
+// Lazily loaded SKILL.md content for howWork tool
+let SKILL_CONTENT = null;
+async function getSkillContent() {
+    if (SKILL_CONTENT !== null) return SKILL_CONTENT;
+    const selfPath = fileURLToPath(import.meta.url);
+    const skillPath = path.join(path.dirname(selfPath), 'skills', 'memfs_best_practices', 'SKILL.md');
+    try {
+        SKILL_CONTENT = await fs.readFile(skillPath, 'utf-8');
+    } catch {
+        SKILL_CONTENT = 'MemFS 知识图谱管理系统。使用 searchNode 搜索知识，readNode 读取详情。';
+    }
+    return SKILL_CONTENT;
+}
+
 /**
  * Zod preprocessor helper: accepts both native arrays and JSON-string-encoded arrays.
  * Fixes a serialization gap where AstrBot's tool call framework sometimes passes
@@ -1362,27 +1376,7 @@ export class KnowledgeGraphManager {
         return nodes;
     }
     async howWork() {
-        return `推荐工作流：
-
-1. listNode
-   → 获取所有实体索引（名称、类型、定义）
-   → 适合了解整体结构和快速浏览
-
-2. readNode(["实体名"])
-   → 获取特定实体的详细信息
-   → 包含：观察（observations）、定义（definition）、关系（relations）
-   → 关系内联包含目标实体的名称、类型、定义
-
-3. 结合用户提问和关系选择搜索方式
-   → 如果需要搜索关键词：searchNode("关键词1 关键词2")
-   → 如果需要查看特定实体：readNode(["实体名"])
-   → 多关键词自动去重合并，返回相关性排序结果
-
-实用技巧：
-- 先 listNode 了解有哪些实体
-- 再 readNode 查看感兴趣的实体详情
-- 通过关系发现关联实体（如 A 知道 B，可再 readNode(["B"])）
-- searchNode 支持多关键词，空格分隔，去重合并`;
+        return await getSkillContent();
     }
     async updateObservation(updates) {
         // Defensive: ensure updates is an array
@@ -2074,27 +2068,7 @@ server.registerTool("howWork", {
     description: "Get the recommended workflow for using the knowledge graph system.",
     inputSchema: {},
 }, async () => {
-    const workflow = `推荐工作流：
-
-1. listNode
-   → 获取所有实体索引（名称、类型、定义）
-   → 适合了解整体结构和快速浏览
-
-2. readNode(["实体名"])
-   → 获取特定实体的详细信息
-   → 包含：观察（observations）、定义（definition）、关系（relations）
-   → 关系内联包含目标实体的名称、类型、定义
-
-3. 结合用户提问和关系选择搜索方式
-   → 如果需要搜索关键词：searchNode("关键词1 关键词2")
-   → 如果需要查看特定实体：readNode(["实体名"])
-   → 多关键词自动去重合并，返回相关性排序结果
-
-实用技巧：
-- 先 listNode 了解有哪些实体
-- 再 readNode 查看感兴趣的实体详情
-- 通过关系发现关联实体（如 A 知道 B，可再 readNode(["B"])）
-- searchNode 支持多关键词，空格分隔，去重合并`;
+    const workflow = await knowledgeGraphManager.howWork();
     return {
         content: [{ type: "text", text: workflow }],
         structuredContent: { workflow }
