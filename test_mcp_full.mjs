@@ -111,7 +111,7 @@ async function test() {
         if (sharedObsId) {
             const reuseResult = await client.callTool('addObservation', {
                 observations: [
-                    { mode: 'link-single', entityName: REACT, observationId: sharedObsId }
+                    { mode: 'link', entityName: REACT, observationIds: sharedObsId }
                 ]
             });
             const reuseData = parseToolResult(reuseResult);
@@ -121,7 +121,7 @@ async function test() {
             // 验证 TS 也复用同一个观察
             const reuseMultiResult = await client.callTool('addObservation', {
                 observations: [
-                    { mode: 'link-multi', entityName: TS, observationIds: [sharedObsId] }
+                    { mode: 'link', entityName: TS, observationIds: [sharedObsId] }
                 ]
             });
             const reuseMultiData = parseToolResult(reuseMultiResult);
@@ -243,6 +243,100 @@ async function test() {
         } else {
             assert(true, '21. recycleObservation 跳过（无孤儿）');
         }
+
+        // ============================================================
+        // Concurrency 测试
+        // ============================================================
+        section('Concurrency 测试 (并发安全)');
+
+        const { KnowledgeGraphManager } = await import('./index.js');
+        const { promises: fs } = await import('fs');
+        const concFile = path.join(memoryDir, 'concurrency_test.jsonl');
+        try { await fs.unlink(concFile); } catch {}
+
+        const km = new KnowledgeGraphManager(concFile);
+
+        const concCount = 30;
+        const concCalls = [];
+        for (let i = 0; i < concCount; i++) {
+            concCalls.push(km.createEntity([{ name: `${PREFIX}_CONC_${i}`, entityType: 'test', definition: '', observations: [] }]));
+        }
+        await Promise.all(concCalls);
+
+        const concGraph = await km.loadGraph();
+        assert(concGraph.entities.length === concCount, `22. createEntity ${concCount}次并发，结果 ${concGraph.entities.length} 个实体`);
+
+        const mixedCalls = [];
+        for (let i = 0; i < 5; i++) {
+            mixedCalls.push(km.createEntity([{ name: `${PREFIX}_MIX_${i}`, entityType: 'test', definition: '', observations: ['obs'] }]));
+        }
+        mixedCalls.push(km.setDefinition(`${PREFIX}_CONC_0`, 'conc def'));
+        mixedCalls.push(km.addObservation([{ entityName: `${PREFIX}_CONC_1`, contents: ['conc obs'] }]));
+        mixedCalls.push(km.deleteEntity([`${PREFIX}_CONC_5`]));
+        await Promise.all(mixedCalls);
+
+        const mixGraph = await km.loadGraph();
+        const expected = concCount - 1 + 5;
+        assert(mixGraph.entities.length === expected, `23. 混合并发操作，结果 ${mixGraph.entities.length} 个实体 (预期 ${expected})`);
+        assert(mixGraph.definitions.length === 1, `24. 并发 setDefinition 写入定义`);
+
+        const concObs = mixGraph.observations.find(o => o.content === 'conc obs');
+        assert(concObs !== undefined, `25. 并发 addObservation 写入观察`);
+
+        await fs.unlink(concFile).catch(() => {});
+
+        // ============================================================
+        // SSE 模式测试
+        // ============================================================
+        section('SSE 模式测试');
+
+        const http = await import('http');
+        const ssePort = 19520 + (timestamp % 10000);
+
+        // 启动 SSE 服务器
+        const sseServer = spawn('node', [path.join(__dirname, 'index.js'), '--mode', 'sse', '--port', String(ssePort), '--token', 'test-token'], {
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env: { ...process.env, MEMORY_DIR: memoryDir }
+        });
+
+        // 等待服务器启动
+        await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error('SSE server start timeout')), 8000);
+            sseServer.stderr.on('data', (data) => {
+                if (data.toString().includes('running on SSE')) {
+                    clearTimeout(timeout);
+                    resolve();
+                }
+            });
+            sseServer.on('error', reject);
+        });
+
+        // Test: 无 token 应返回 401
+        const res1 = await fetch(`http://localhost:${ssePort}/sse`);
+        assert(res1.status === 401, '26. SSE 无 token 返回 401');
+
+        // Test: 错误 token 应返回 401
+        const res2 = await fetch(`http://localhost:${ssePort}/sse?token=wrong`);
+        assert(res2.status === 401, '27. SSE 错误 token 返回 401');
+
+        // Test: 正确 token 应返回 200 并建立 SSE 流
+        const res3 = await fetch(`http://localhost:${ssePort}/sse?token=test-token`);
+        assert(res3.status === 200, '28. SSE 正确 token 返回 200');
+        const sseText = await res3.text();
+        assert(sseText.includes('event: endpoint'), '29. SSE 返回 endpoint 事件');
+        assert(sseText.includes('sessionId='), '30. SSE 返回 sessionId');
+
+        // Test: /message 无 token 应返回 401
+        const res4 = await fetch(`http://localhost:${ssePort}/message?sessionId=test`, { method: 'POST' });
+        assert(res4.status === 401, '31. SSE POST /message 无 token 返回 401');
+
+        // Test: Authorization Bearer header
+        const res5 = await fetch(`http://localhost:${ssePort}/sse`, {
+            headers: { 'Authorization': 'Bearer test-token' }
+        });
+        assert(res5.status === 200, '32. SSE Bearer token header 返回 200');
+
+        sseServer.kill();
 
         // ============================================================
         // 测试结果

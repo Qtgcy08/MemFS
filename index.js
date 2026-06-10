@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import express from 'express';
 import { z } from "zod";
 import Fuse from 'fuse.js';
 import { promises as fs } from 'fs';
@@ -13,7 +15,34 @@ import { execSync, execFileSync } from 'child_process';
 import { SearchIntegrator } from './src/tfidf/searchIntegrator.js';
 
 // Global constants
-const VERSION = "2.4.12";
+const VERSION = "2.5.21";
+
+/**
+ * Zod preprocessor helper: accepts both native arrays and JSON-string-encoded arrays.
+ * Fixes a serialization gap where AstrBot's tool call framework sometimes passes
+ * array parameters as JSON strings instead of parsed objects.
+ * @param {z.ZodSchema} schema - The Zod schema to wrap (e.g., z.array(...))
+ * @returns {z.ZodEffects}
+ */
+function withArrayFallback(schema) {
+    return z.preprocess(
+        (val) => {
+            if (typeof val !== 'string') return val;
+            // 递归 JSON.parse：框架层可能双重编码，parse 一次得到的还是 string
+            let parsed = val;
+            while (typeof parsed === 'string') {
+                try {
+                    parsed = JSON.parse(parsed);
+                } catch (_) {
+                    // 不是合法 JSON，返回原始值让 Zod 自己报错
+                    return parsed;
+                }
+            }
+            return parsed;
+        },
+        schema
+    );
+}
 
 // Get user home directory with fallback
 function getHomeDir() {
@@ -93,13 +122,10 @@ const gitSync = {
     },
     
     // Log to console buffer (for getConsole tool)
+    // Note: console.error is globally overridden to also push to consoleBuffer,
+    // so we don't need to push here - just call console.error.
     log(level, message) {
-        consoleBuffer.push(`[Git] ${message}`);
-        if (level === 'error') {
-            console.error(`[Git] ${message}`);
-        } else {
-            console.error(`[Git] ${message}`);
-        }
+        console.error(`[Git] ${message}`);
     },
     
     // Execute git command
@@ -244,21 +270,20 @@ let MEMORY_FILE_PATH;
 // - New format: {utc, timezone} -> converts to local time with IANA timezone
 function formatObservations(observations, includeTime = false) {
     return observations.map(o => {
-        const ts = includeTime ? formatObservationTimestamp(o.createdAt) : { createdAt: null, updatedAt: null };
-        const base = {
-            id: o.id,
-            content: o.content,
-            createdAt: null  // 默认为 null，time=true 时会被覆盖
-        };
+        let createdAt = null, updatedAt = null;
         if (includeTime) {
-            if (ts.updatedAt) {
-                base.updatedAt = ts.updatedAt;
+            if (o.createdAt && typeof o.createdAt === 'object' && o.createdAt.utc) {
+                createdAt = formatWithTimezone(o.createdAt.utc, o.createdAt.timezone);
+            } else if (o.createdAt && typeof o.createdAt === 'string') {
+                createdAt = o.createdAt;
             }
-            if (ts.createdAt) {
-                base.createdAt = ts.createdAt;
+            if (o.updatedAt && typeof o.updatedAt === 'object' && o.updatedAt.utc) {
+                updatedAt = formatWithTimezone(o.updatedAt.utc, o.updatedAt.timezone);
+            } else if (o.updatedAt && typeof o.updatedAt === 'string') {
+                updatedAt = o.updatedAt;
             }
         }
-        return base;
+        return { id: o.id, content: o.content, createdAt, updatedAt };
     });
 }
 
@@ -484,6 +509,8 @@ export class KnowledgeGraphManager {
         this.isWindows = process.platform === 'win32';
         this.searchIntegrator = searchIntegrator;
         this.lastOperation = null;
+        this._lockQueue = Promise.resolve();
+        this._release = null;
     }
 
     // Set operation context for git commit message (auto-truncated)
@@ -513,16 +540,31 @@ export class KnowledgeGraphManager {
     // - Node.js 文档说 "Windows doesn't support file locks"
     // - 所以我们选择：相信操作系统 + 原子性写入
     async _acquireLock() {
-        // Windows: 文件锁？不存在的
-        // 我们依靠 fs.writeFile 的原子性 rename 策略
-        // 同一目录下 rename 是原子的，不会race condition
-        // 只要我们不介意偶尔的数据丢失（不是
-        return Promise.resolve();
+        let release;
+        const wait = new Promise(resolve => { release = resolve; });
+        const prev = this._lockQueue;
+        this._lockQueue = this._lockQueue.then(() => wait);
+        await prev;
+        this._release = release;
     }
     
     // Release file lock
     async _releaseLock() {
-        this.fileLock = null;
+        if (this._release) {
+            const release = this._release;
+            this._release = null;
+            release();
+        }
+    }
+    
+    // Run a function with exclusive access (serializes load-modify-write cycle)
+    async _runExclusive(fn) {
+        await this._acquireLock();
+        try {
+            return await fn();
+        } finally {
+            await this._releaseLock();
+        }
     }
     
     // Close and cleanup resources
@@ -685,46 +727,38 @@ export class KnowledgeGraphManager {
     }
     
     async saveGraph(graph) {
-        // Acquire exclusive lock
-        await this._acquireLock();
-        
-        try {
-            const lines = [
-                ...graph.entities.map(e => JSON.stringify({
-                    type: "entity",
-                    name: e.name,
-                    entityType: e.entityType,
-                    definition: e.definition || "",
-                    definitionSource: e.definitionSource === undefined || e.definitionSource === null ? null : String(e.definitionSource),
-                    observationIds: e.observationIds || []
-                })),
-                ...graph.observations.map(o => JSON.stringify({
-                    type: "observation",
-                    id: o.id,
-                    content: o.content,
-                    createdAt: o.createdAt || null,
-                    updatedAt: o.updatedAt || null
-                })),
-                ...graph.definitions.map(d => JSON.stringify({
-                    type: "definition",
-                    entityName: d.entityName,
-                    content: d.content,
-                    source: d.source || null,
-                    createdAt: d.createdAt || null,
-                    updatedAt: d.updatedAt || null
-                })),
-                ...graph.relations.map(r => JSON.stringify({
-                    type: "relation",
-                    from: r.from,
-                    to: r.to,
-                    relationType: r.relationType
-                })),
-            ];
-            await fs.writeFile(this.memoryFilePath, lines.join("\n"));
-        } finally {
-            // Always release lock
-            await this._releaseLock();
-        }
+        const lines = [
+            ...graph.entities.map(e => JSON.stringify({
+                type: "entity",
+                name: e.name,
+                entityType: e.entityType,
+                definition: e.definition || "",
+                definitionSource: e.definitionSource === undefined || e.definitionSource === null ? null : String(e.definitionSource),
+                observationIds: e.observationIds || []
+            })),
+            ...graph.observations.map(o => JSON.stringify({
+                type: "observation",
+                id: o.id,
+                content: o.content,
+                createdAt: o.createdAt || null,
+                updatedAt: o.updatedAt || null
+            })),
+            ...graph.definitions.map(d => JSON.stringify({
+                type: "definition",
+                entityName: d.entityName,
+                content: d.content,
+                source: d.source || null,
+                createdAt: d.createdAt || null,
+                updatedAt: d.updatedAt || null
+            })),
+            ...graph.relations.map(r => JSON.stringify({
+                type: "relation",
+                from: r.from,
+                to: r.to,
+                relationType: r.relationType
+            })),
+        ];
+        await fs.writeFile(this.memoryFilePath, lines.join("\n"));
         
         // Clear cache since file was modified
         this._clearCache();
@@ -740,6 +774,7 @@ export class KnowledgeGraphManager {
         console.error('[Git] autoCommit returned');
     }
     async createEntity(entities) {
+        return this._runExclusive(async () => {
         const graph = await this.loadGraph();
         const now = getCurrentTimestamp();
         
@@ -816,9 +851,20 @@ export class KnowledgeGraphManager {
             skippedEntities: skippedEntities,
             message: message
         };
+        });
     }
     async createRelation(relations) {
+        return this._runExclusive(async () => {
         const graph = await this.loadGraph();
+        const entityNames = new Set(graph.entities.map(e => e.name));
+        for (const r of relations) {
+            if (!entityNames.has(r.from)) {
+                throw new Error(`Entity "${r.from}" not found - create it first before adding relations`);
+            }
+            if (!entityNames.has(r.to)) {
+                throw new Error(`Entity "${r.to}" not found - create it first before adding relations`);
+            }
+        }
         const newRelations = relations.filter(r => !graph.relations.some(existingRelation => existingRelation.from === r.from &&
             existingRelation.to === r.to &&
             existingRelation.relationType === r.relationType));
@@ -830,6 +876,7 @@ export class KnowledgeGraphManager {
         
         await this.saveGraph(graph);
         return newRelations;
+        });
     }
     /**
      * Add observations to entities
@@ -840,9 +887,10 @@ export class KnowledgeGraphManager {
      * 2. Link to existing observations: provide 'observationId' or 'observationIds'
      *    - For observation reuse across multiple entities
      * 
-     * @param {Array} observations - Array of { entityName, contents?, observationId?, observationIds? }
+     * @param {Array} observations - Array of { entityName, contents?, observationIds? }
      */
     async addObservation(observations) {
+        return this._runExclusive(async () => {
         const graph = await this.loadGraph();
         
         // Get next observation ID
@@ -864,18 +912,7 @@ export class KnowledgeGraphManager {
             const linkedIds = [];
             const newContents = [];
             
-            // Mode 2: Link to existing observations by ID
-            if (o.observationId !== undefined) {
-                const obs = graph.observations.find(obs => obs.id === o.observationId);
-                if (!obs) {
-                    throw new Error(`Observation with ID "${o.observationId}" not found`);
-                }
-                if (!entity.observationIds.includes(o.observationId)) {
-                    entity.observationIds.push(o.observationId);
-                    linkedIds.push(o.observationId);
-                }
-            }
-            
+            // Mode 2: Link to existing observations by ID(s)
             if (o.observationIds !== undefined) {
                 for (const obsId of o.observationIds) {
                     const obs = graph.observations.find(obs => obs.id === obsId);
@@ -889,8 +926,8 @@ export class KnowledgeGraphManager {
                 }
             }
             
-            // Mode 1: Create new observations by content (only if no observationId(s) provided)
-            if (o.contents && o.observationId === undefined && !o.observationIds) {
+            // Mode 1: Create new observations by content (only if no observationIds provided)
+            if (o.contents && !o.observationIds) {
                 for (const content of o.contents) {
                     // Check if same observation already exists (deduplication)
                     const existingObs = graph.observations.find(obs => obs.content === content);
@@ -929,8 +966,10 @@ export class KnowledgeGraphManager {
         
         await this.saveGraph(graph);
         return results;
+        });
     }
     async deleteEntity(entityNames) {
+        return this._runExclusive(async () => {
         const graph = await this.loadGraph();
         
         // Capture deleted entities and relations for potential undo
@@ -949,8 +988,10 @@ export class KnowledgeGraphManager {
             deletedEntities,
             deletedRelations
         };
+        });
     }
     async unlinkObservation(observationIds, entityNames) {
+        return this._runExclusive(async () => {
         const graph = await this.loadGraph();
         const warnings = [];
         const results = [];
@@ -1023,8 +1064,10 @@ export class KnowledgeGraphManager {
             warnings: warnings,
             results: results
         };
+        });
     }
     async deleteRelation(relations) {
+        return this._runExclusive(async () => {
         const graph = await this.loadGraph();
         graph.relations = graph.relations.filter(r => !relations.some(delRelation => r.from === delRelation.from &&
             r.to === delRelation.to &&
@@ -1035,8 +1078,10 @@ export class KnowledgeGraphManager {
         this._setOperation('deleteRelation', ...relDescs);
         
         await this.saveGraph(graph);
+        });
     }
     async recycleObservation(observationIds, force = false) {
+        return this._runExclusive(async () => {
         const graph = await this.loadGraph();
         const results = [];
         const warnings = [];
@@ -1108,8 +1153,10 @@ export class KnowledgeGraphManager {
             skipped: skipped,
             warnings: warnings
         };
+        });
     }
     async setDefinition(entityName, content, source = null) {
+        return this._runExclusive(async () => {
         const graph = await this.loadGraph();
         // Ensure entity exists
         const entity = graph.entities.find(e => e.name === entityName);
@@ -1138,8 +1185,10 @@ export class KnowledgeGraphManager {
         this._setOperation('setDefinition', entityName);
         
         await this.saveGraph(graph);
+        });
     }
     async updateNode(updates) {
+        return this._runExclusive(async () => {
         const graph = await this.loadGraph();
         const now = getCurrentTimestamp();
         const results = [];
@@ -1243,6 +1292,7 @@ export class KnowledgeGraphManager {
         
         await this.saveGraph(graph);
         return results;
+        });
     }
     async getOrphanObservation() {
         const graph = await this.loadGraph();
@@ -1259,10 +1309,12 @@ export class KnowledgeGraphManager {
         return orphanObservations.map(obs => ({
             id: obs.id,
             content: obs.content,
-            createdAt: formatTimestamp(obs.createdAt)?.value
+            createdAt: obs.createdAt || null,
+            updatedAt: obs.updatedAt || null
         }));
     }
     async _updateObservationSingle(observationId, newContent) {
+        return this._runExclusive(async () => {
         const graph = await this.loadGraph();
         
         const observation = graph.observations.find(o => o.id === observationId);
@@ -1293,6 +1345,7 @@ export class KnowledgeGraphManager {
             updatedAt: formatTimestamp(getCurrentTimestamp())?.value,
             createdAt: formatTimestamp(observation.createdAt)?.value
         };
+        });
     }
     async listNode() {
         const graph = await this.loadGraph();
@@ -1422,7 +1475,8 @@ export class KnowledgeGraphManager {
                 return obs ? {
                     id: obs.id,
                     content: obs.content,
-                    createdAt: formatTimestamp(obs.createdAt)?.value || null
+                    createdAt: formatTimestamp(obs.createdAt)?.value || null,
+                    updatedAt: formatTimestamp(obs.updatedAt)?.value || null
                 } : null;
             })
             .filter(o => o !== null);
@@ -1515,9 +1569,10 @@ export class KnowledgeGraphManager {
         const cleanObservations = filteredObservations.map(o => ({
             id: o.id,
             content: o.content,
-            createdAt: o.createdAt || null
+            createdAt: o.createdAt || null,
+            updatedAt: o.updatedAt || null
         }));
-        
+
         const filteredGraph = {
             entities: cleanedEntities,
             relations: enrichedRelations,
@@ -1536,7 +1591,8 @@ export class KnowledgeGraphManager {
                 results.push({
                     id: observation.id,
                     content: observation.content,
-                    createdAt: observation.createdAt || null
+                    createdAt: observation.createdAt || null,
+                    updatedAt: observation.updatedAt || null
                 });
             }
         }
@@ -1601,11 +1657,24 @@ server.registerTool("getConsole", {
     title: "Get Console",
     description: "Retrieve buffered server logs and recent git commits.",
     inputSchema: {
+        logs: z.number().optional().default(15).describe("Number of recent git commits to show (only when GITAUTOCOMMIT is enabled)"),
+        reloadnow: z.boolean().optional().default(false).describe("Force reload graph from disk after external git operations (pull/checkout/merge) — clears memory cache and rebuilds search index"),
         easterEgg: z.boolean().optional().default(false).describe("Easter egg activated")
     },
-    outputSchema: {}
-}, async ({ easterEgg }) => {
+}, async ({ logs, reloadnow, easterEgg }) => {
     const lines = [];
+    
+    // Force reload on demand (e.g., after external git operations)
+    if (reloadnow) {
+        console.error('[MCP Server] Reload requested: clearing memory cache');
+        knowledgeGraphManager._clearCache();
+        const reloaded = await knowledgeGraphManager.loadGraph();
+        const rlEntityCount = reloaded.entities.length;
+        const rlObsCount = reloaded.observations.length;
+        const rlRelCount = reloaded.relations.length;
+        console.error(`[Stats] Reloaded: ${rlEntityCount} entities | ${rlObsCount} observations | ${rlRelCount} relations`);
+        await searchIntegrator.ensureIndex('Index rebuilt');
+    }
     
     // Add buffered messages
     for (const msg of consoleBuffer) {
@@ -1615,7 +1684,8 @@ server.registerTool("getConsole", {
     // Get recent git log if git sync is enabled and initialized
     if (gitSync.isEnabled() && gitSync.initialized) {
         // Format: %h %an <%ae> %s (short hash, author name, email, subject)
-        const logResult = await gitSync.execGit(['log', '--format=%h %an <%ae> %s', '-10'], gitSync.memoryDir);
+        const logCount = Math.min(Math.max(1, logs || 20), 100);
+        const logResult = await gitSync.execGit(['log', `--format=%h %an <%ae> %s`, `-${logCount}`], gitSync.memoryDir);
         if (logResult.success) {
             const commits = logResult.output.trim().split('\n');
             for (const commit of commits) {
@@ -1624,10 +1694,28 @@ server.registerTool("getConsole", {
         }
     }
     
+    // Add current stats
+    try {
+        const graph = await knowledgeGraphManager.loadGraph();
+        const nowEntityCount = graph.entities.length;
+        const nowObservationCount = graph.observations.length;
+        const nowRelationCount = graph.relations.length;
+        const nowIndexSize = searchIntegrator.getIndexSize();
+        const nowIndexSizeStr = nowIndexSize >= 1024 * 1024
+            ? `${(nowIndexSize / (1024 * 1024)).toFixed(2)} MB`
+            : nowIndexSize >= 1024
+                ? `${(nowIndexSize / 1024).toFixed(2)} KB`
+                : `${nowIndexSize} B`;
+        lines.push('');
+        lines.push(`[Stats] ${nowEntityCount} entities | ${nowObservationCount} observations | ${nowRelationCount} relations | index ${nowIndexSizeStr} | now at [utc:${new Date().toISOString()}]`);
+    } catch (e) {
+        // best effort
+    }
+
     // Easter egg for 乐正绫's 11th birthday
     if (easterEgg) {
         lines.push('');
-        lines.push('🎉 "乐正司百曲，绫动万年红" —— 阿绫11周年生日快乐！');
+        lines.push('🎉 乐正司百曲，绫动万年红 —— 阿绫11周年生日快乐！[v2.4.12]');
     }
     
     return {
@@ -1640,12 +1728,8 @@ server.registerTool("createEntity", {
     title: "Create Entity",
     description: "Create multiple entities with names, types, and definitions. Skips duplicate entities - use updateNode to modify existing ones.",
     inputSchema: {
-        entities: z.array(EntitySchema)
+        entities: withArrayFallback(z.array(EntitySchema))
     },
-    outputSchema: {
-        entities: z.array(EntityOutputSchema),
-        skipped: z.array(z.string())
-    }
 }, async ({ entities }) => {
     const result = await knowledgeGraphManager.createEntity(entities);
     return {
@@ -1661,11 +1745,8 @@ server.registerTool("createRelation", {
     title: "Create Relation",
     description: "Create multiple relations between entities. Use active voice for relation types (e.g., 'includes', 'relates to', 'follows').",
     inputSchema: {
-        relations: z.array(RelationSchema)
+        relations: withArrayFallback(z.array(RelationSchema))
     },
-    outputSchema: {
-        relations: z.array(RelationSchema)
-    }
 }, async ({ relations }) => {
     const result = await knowledgeGraphManager.createRelation(relations);
     return {
@@ -1676,45 +1757,29 @@ server.registerTool("createRelation", {
 // Register add_observations tool
  server.registerTool("addObservation", {
     title: "Add Observation",
-    description: "Add observations to multiple entities. Supports two modes:\n1. Create: provide 'contents' array to create new observations (deduplication applies)\n2. Link: provide 'observationId' or 'observationIds' to link to existing observations\n\nMode selection is determined by which fields are provided (mutually exclusive per item).",
+    description: "Add observations to multiple entities. Supports two modes:\n1. Create: provide 'contents' array to create new observations (deduplication applies)\n2. Link: provide 'observationIds' (single ID or array) to link to existing observations\n\nMode selection is determined by which fields are provided (mutually exclusive per item).",
     inputSchema: {
-        // 使用 discriminatedUnion 处理互斥字段：contents 和 observationId(s) 二选一
-        observations: z.array(z.discriminatedUnion('mode', [
-            // Mode 1: Create new observations by content
+        observations: withArrayFallback(z.array(z.discriminatedUnion('mode', [
             z.object({
                 mode: z.literal('create'),
                 entityName: z.string().describe("The name of the entity to add the observations to"),
                 contents: z.array(z.string()).describe("Create new observations with these contents (deduplication applies)")
             }),
-            // Mode 2: Link to existing observation by ID
             z.object({
-                mode: z.literal('link-single'),
+                mode: z.literal('link'),
                 entityName: z.string().describe("The name of the entity to add the observations to"),
-                observationId: z.number().describe("Link to an existing observation by ID (for reuse)")
-            }),
-            // Mode 3: Link to multiple existing observations by IDs
-            z.object({
-                mode: z.literal('link-multi'),
-                entityName: z.string().describe("The name of the entity to add the observations to"),
-                observationIds: z.array(z.number()).describe("Link to multiple existing observations by ID (for reuse)")
+                observationIds: z.union([z.number(), z.array(z.number())]).describe("Observation ID(s) to link to this entity (single number or array)")
             })
-        ]))
+        ])))
     },
-    outputSchema: {
-        results: z.array(z.object({
-            entityName: z.string(),
-            addedObservations: z.array(z.string()).optional(),
-            addedObservationIds: z.array(z.number()).optional(),
-            linkedObservationIds: z.array(z.number()).optional()
-        }))
-    }
  }, async ({ observations }) => {
-    // Transform discriminated union format back to internal format
+    // Normalize discriminated union to internal format
     const internalObs = observations.map(o => ({
         entityName: o.entityName,
         contents: o.mode === 'create' ? o.contents : undefined,
-        observationId: o.mode === 'link-single' ? o.observationId : undefined,
-        observationIds: o.mode === 'link-multi' ? o.observationIds : undefined
+        observationIds: o.mode === 'link'
+            ? (Array.isArray(o.observationIds) ? o.observationIds : [o.observationIds])
+            : undefined
     }));
     const result = await knowledgeGraphManager.addObservation(internalObs);
     const allNewIds = result.flatMap(r => r.addedObservationIds || []);
@@ -1734,22 +1799,6 @@ server.registerTool("deleteEntity", {
     inputSchema: {
         entityNames: z.array(z.string()).describe("An array of entity names to delete")
     },
-    outputSchema: {
-        success: z.boolean(),
-        message: z.string(),
-        deletedEntities: z.array(z.object({
-            name: z.string(),
-            entityType: z.string(),
-            definition: z.string(),
-            definitionSource: z.string().nullable().optional(),
-            observationIds: z.array(z.number())
-        })),
-        deletedRelations: z.array(z.object({
-            from: z.string(),
-            to: z.string(),
-            relationType: z.string()
-        }))
-    }
 }, async ({ entityNames }) => {
     const result = await knowledgeGraphManager.deleteEntity(entityNames);
     const names = result.deletedEntities.map(e => e.name).join(', ');
@@ -1771,22 +1820,6 @@ server.registerTool("unlinkObservation", {
         observationIds: z.array(z.number()).describe("Observation IDs to unlink"),
         entityNames: z.array(z.string()).describe("Entity names to unlink from (omit to unlink from all)")
     },
-    outputSchema: {
-        success: z.boolean(),
-        warnings: z.array(z.string()),
-        results: z.array(z.object({
-            observationId: z.number(),
-            originalContent: z.string(),
-            removedFrom: z.array(z.string()),
-            notFoundEntities: z.array(z.string()),
-            observationData: z.object({
-                id: z.number(),
-                content: z.string(),
-                createdAt: z.any(),
-                updatedAt: z.any()
-            })
-        }))
-    }
 }, async ({ observationIds, entityNames }) => {
     const result = await knowledgeGraphManager.unlinkObservation(observationIds, entityNames);
     const unlinkedIds = result.results.filter(r => r.observationId).map(r => r.observationId);
@@ -1806,10 +1839,6 @@ server.registerTool("deleteRelation", {
     inputSchema: {
         relations: z.array(RelationSchema).describe("An array of relations to delete")
     },
-    outputSchema: {
-        success: z.boolean(),
-        message: z.string()
-    }
 }, async ({ relations }) => {
     await knowledgeGraphManager.deleteRelation(relations);
     return {
@@ -1825,24 +1854,6 @@ server.registerTool("recycleObservation", {
         observationIds: z.array(z.number()).describe("Array of observation IDs to permanently delete"),
         force: z.boolean().optional().default(false).describe("Force delete even if observation is still referenced by entities")
     },
-    outputSchema: {
-        success: z.boolean(),
-        deleted: z.array(z.object({
-            observationId: z.number(),
-            content: z.string(),
-            referencedBy: z.array(z.object({
-                entityName: z.string(),
-                observationIds: z.array(z.number())
-            })).optional(),
-            forceDeleted: z.boolean().optional()
-        })),
-        skipped: z.array(z.object({
-            observationId: z.number(),
-            content: z.string(),
-            referencedBy: z.array(z.string())
-        })),
-        warnings: z.array(z.string())
-    }
 }, async ({ observationIds, force }) => {
     const result = await knowledgeGraphManager.recycleObservation(observationIds, force);
     const warningText = result.warnings.length > 0
@@ -1860,15 +1871,6 @@ server.registerTool("listGraph", {
     inputSchema: {
         time: z.boolean().optional().default(false).describe("Include observation timestamps (createdAt)")
     },
-    outputSchema: {
-        entities: z.array(EntityOutputSchema),
-        observations: z.array(z.object({
-            id: z.number(),
-            content: z.string(),
-            createdAt: z.string().nullable()
-        })),
-        relations: z.array(RelationSchema)
-    }
  }, async ({ time }) => {
     const graph = await knowledgeGraphManager.listGraph();
     // Explicitly clean all data to match output schema
@@ -1908,20 +1910,6 @@ server.registerTool("searchNode", {
         fuzzyWeight: z.number().optional().default(0.3).describe("Weight for Fuse.js fuzzy matching (0-1, default: 0.3)"),
         minScore: z.number().optional().default(0.1).describe("Minimum relevance score threshold (default: 0.1)")
     },
-    outputSchema: {
-        entities: z.array(SearchNodeEntitySchema),
-        relations: z.array(z.object({
-            from: z.string(),
-            to: z.string(),
-            relationType: z.string()
-        })),
-        observations: z.array(z.object({
-            id: z.number(),
-            content: z.string(),
-            createdAt: z.string().nullable(),
-            updatedAt: z.string().nullable()
-        }))
-    }
 }, async ({ query, time, basicFetch, limit, maxObservationsPerEntity, totalMultiplier, bm25Weight, fuzzyWeight, minScore }) => {
     const result = await searchIntegrator.searchNode(query, {
         basicFetch,
@@ -1958,23 +1946,6 @@ server.registerTool("readNode", {
         names: z.array(z.string()).describe("An array of entity names to retrieve"),
         time: z.boolean().optional().default(false).describe("Include observation timestamps (createdAt)")
     },
-    outputSchema: {
-        entities: z.array(SearchNodeEntitySchema),
-        relations: z.array(z.object({
-            from: z.string(),
-            to: z.object({
-                name: z.string(),
-                entityType: z.string(),
-                definition: z.string()
-            }),
-            relationType: z.string()
-        })),
-        observations: z.array(z.object({
-            id: z.number(),
-            content: z.string(),
-            createdAt: z.string().nullable()
-        }))
-    }
 }, async ({ names, time }) => {
     const graph = await knowledgeGraphManager.readNode(names);
     const result = {
@@ -1992,8 +1963,7 @@ server.registerTool("updateNode", {
     title: "Update Node",
     description: "Update multiple entities and their observations. Shared observations use copy-on-write to preserve other entity references.",
     inputSchema: {
-        updates: z.array(z.object({
-            entityName: z.string().describe("The name of the entity to update"),
+        updates: withArrayFallback(z.array(z.object({
             name: z.string().optional().describe("New name for the entity"),
             definition: z.string().optional().describe("New definition for the entity"),
             definitionSource: z.string().optional().describe("Source for the definition"),
@@ -2002,19 +1972,8 @@ server.registerTool("updateNode", {
                 oldContent: z.string().describe("The observation content to replace"),
                 newContent: z.string().describe("The new observation content")
             })).optional().describe("Observation updates - uses copy-on-write if shared")
-        }))
+        })))
     },
-    outputSchema: {
-        results: z.array(z.object({
-            entityName: z.string(),
-            updated: z.object({
-                name: z.string(),
-                definition: z.string(),
-                entityType: z.string(),
-                observationIds: z.array(z.number())
-            })
-        }))
-    }
 }, async ({ updates }) => {
     const results = await knowledgeGraphManager.updateNode(updates);
     const updatedNames = results.map(r => r.entityName).join(', ');
@@ -2030,13 +1989,6 @@ server.registerTool("getOrphanObservation", {
     inputSchema: {
         time: z.boolean().optional().default(false).describe("Include observation timestamps (createdAt)")
     },
-    outputSchema: {
-        orphanObservations: z.array(z.object({
-            id: z.number(),
-            content: z.string(),
-            createdAt: z.string().nullable()
-        }))
-    }
 }, async ({ time }) => {
     const orphanObservations = await knowledgeGraphManager.getOrphanObservation();
     const result = formatObservations(orphanObservations, time);
@@ -2053,13 +2005,6 @@ server.registerTool("readObservation", {
         ids: z.array(z.number()).describe("Array of observation IDs to retrieve"),
         time: z.boolean().optional().default(false).describe("Include observation timestamps (createdAt)")
     },
-    outputSchema: {
-        observations: z.array(z.object({
-            id: z.number(),
-            content: z.string(),
-            createdAt: z.string().nullable()
-        }))
-    }
 }, async ({ ids, time }) => {
     const observations = await knowledgeGraphManager.readObservation(ids);
     
@@ -2067,7 +2012,8 @@ server.registerTool("readObservation", {
     const result = observations.map(o => ({
         id: o.id,
         content: o.content,
-        createdAt: time ? formatTimestamp(o.createdAt)?.value : null
+        createdAt: time ? formatTimestamp(o.createdAt)?.value : null,
+        updatedAt: time ? (formatTimestamp(o.updatedAt)?.value ?? null) : null
     }));
     
     return {
@@ -2086,16 +2032,6 @@ server.registerTool("updateObservation", {
         })),
         time: z.boolean().optional().default(false).describe("Include observation timestamps (createdAt)")
     },
-    outputSchema: {
-        results: z.array(z.object({
-            observationId: z.number(),
-            oldContent: z.string(),
-            newContent: z.string(),
-            linkedEntities: z.array(z.string()),
-            updatedAt: z.string(),
-            createdAt: z.string().nullable()
-        }))
-    }
 }, async ({ updates, time }) => {
     // Defensive: ensure updates is an array
     const updateArray = Array.isArray(updates) ? updates : [];
@@ -2125,14 +2061,6 @@ server.registerTool("listNode", {
     title: "List Node",
     description: "List all entity names, types, and definitions. Use readNode for detailed observations and relations.",
     inputSchema: {},
-    outputSchema: {
-        nodes: z.array(z.object({
-            name: z.string(),
-            entityType: z.string(),
-            definition: z.string(),
-            definitionSource: z.string().nullable()
-        }))
-    }
 }, async () => {
     const nodes = await knowledgeGraphManager.listNode();
     return {
@@ -2145,9 +2073,6 @@ server.registerTool("howWork", {
     title: "How It Works",
     description: "Get the recommended workflow for using the knowledge graph system.",
     inputSchema: {},
-    outputSchema: {
-        workflow: z.string()
-    }
 }, async () => {
     const workflow = `推荐工作流：
 
@@ -2228,13 +2153,76 @@ async function main() {
             ? `${(indexSize / 1024).toFixed(2)} KB`
             : `${indexSize} B`;
     
-    const transport = new StdioServerTransport();
-    await server.connect(transport);
-    console.error(`[MCP Server] MemFS v${VERSION} running on stdio`);
-    console.error(`[Stats] ${entityCount} entities | ${observationCount} observations | ${relationCount} relations | last updated ${lastUpdated}`);
+    const modeIdx = process.argv.indexOf('--mode');
+    const mode = modeIdx !== -1 ? process.argv[modeIdx + 1] : 'stdio';
+    const portIdx = process.argv.indexOf('--port');
+    const port = portIdx !== -1 ? parseInt(process.argv[portIdx + 1]) : 3100;
+    const tokenIdx = process.argv.indexOf('--token');
+    const token = tokenIdx !== -1 ? process.argv[tokenIdx + 1] : null;
+    const startupUtc = new Date().toISOString();
+    
+    function checkToken(req, res) {
+        if (!token) return true;
+        const queryToken = req.query.token;
+        const authHeader = req.headers['authorization'];
+        const headerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+        if (queryToken === token || headerToken === token) return true;
+        res.status(401).end('Unauthorized');
+        return false;
+    }
+    
+    if (mode === 'sse') {
+        const transports = {};
+        const app = express();
+        app.get('/sse', async (req, res) => {
+            if (!checkToken(req, res)) return;
+            const endpoint = token ? `/message?token=${token}` : '/message';
+            const transport = new SSEServerTransport(endpoint, res);
+            transports[transport.sessionId] = transport;
+            res.on('close', () => { delete transports[transport.sessionId]; });
+            await server.connect(transport);
+        });
+        app.post('/message', async (req, res) => {
+            if (!checkToken(req, res)) return;
+            const sessionId = req.query.sessionId;
+            const transport = transports[sessionId];
+            if (transport) {
+                await transport.handlePostMessage(req, res);
+            } else {
+                res.status(404).end('Session not found');
+            }
+        });
+        app.listen(port);
+        const authMsg = token ? `, token auth enabled` : ', no auth';
+        console.error(`[MCP Server] MemFS v${VERSION} running on SSE :${port}${authMsg}`);
+    } else {
+        const transport = new StdioServerTransport();
+        await server.connect(transport);
+        console.error(`[MCP Server] MemFS v${VERSION} running on stdio`);
+    }
+    
+    console.error(`[Stats] ${entityCount} entities | ${observationCount} observations | ${relationCount} relations | last updated ${lastUpdated} | over startup at [utc:${startupUtc}]`);
     console.error(`[Stats] Index size: ${indexSizeStr}`);
 }
-main().catch((error) => {
-    console.error("Fatal error in main():", error);
-    process.exit(1);
-});
+
+// Exports for testing
+export { server, consoleBuffer };
+export function __setTestGlobals(km, si) {
+    knowledgeGraphManager = km;
+    searchIntegrator = si;
+}
+
+// Only run main() when this is the entry point
+// Normalize: handle both "node dir/" and "node dir/index.js"
+const selfPath = fileURLToPath(import.meta.url);
+const entryPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
+const isEntry = entryPath && (
+    selfPath === entryPath || 
+    selfPath === path.join(entryPath, 'index.js')
+);
+if (isEntry) {
+    main().catch((error) => {
+        console.error("Fatal error in main():", error);
+        process.exit(1);
+    });
+}
