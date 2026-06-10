@@ -24,7 +24,7 @@ MemFS 引入了基于 BM25（Best Matching 25）和模糊搜索的混合检索�
 
 **结果排序优化**：将 BM25 和模糊搜索的结果进行加权融合，同时考虑命中的字段类型（如实体名称的权重高于观察内容的权重），最终按照综合相关性得分对结果进行排序。
 
-**向后兼容**：保留传统的关键词匹配模式作为备选方案，用户可以通过 `basicFetch=true` 参数显式选择使用传统搜索，这在某些特殊场景下（如已知确切实体名称时的快速检索）可能更为高效。
+**向后兼容**：保留传统的关键词匹配模式作为备选方案，用户可以通过 `legacyGrep=true` 参数显式选择使用传统搜索，这在某些特殊场景下（如已知确切实体名称时的快速检索）可能更为高效。
 
 **可控返回量**：设置合理的默认返回数量上限（15个），避免一次返回过多结果导致LLM上下文溢出，同时确保用户能够获取足够数量的相关实体。
 
@@ -59,9 +59,9 @@ src/tfidf/
     ▼
 searchIntegrator.searchNode()
     │
-    ├── basicFetch=true ──→ TraditionalSearcher.search() ──→ 返回结果
+    ├── legacyGrep=true ──→ TraditionalSearcher.search() ──→ 返回结果
     │
-    └── basicFetch=false ──→ HybridSearchService.search()
+    └── legacyGrep=false ──→ HybridSearchService.search()
                                 │
                                 ├── 1. cleanText() 清洗查询
                                 ├── 2. tokenizeQuery() 生成 gram tokens
@@ -118,6 +118,22 @@ function tokenizeQuery(query) {
 
     return { tokens, fullQuery, tokenPenalties };
 }
+```
+
+**查询按空格拆分**：`tokenizeQuery()` 先按空格切分查询为多个 whitespace tokens，再对每个 token 分别生成 n-gram。这意味着：
+
+- 多关键词查询（如 `"韦伯 涂尔干"`）会被拆分为 `"韦伯"` + `"涂尔干"` 分别检索，结果聚合
+- 每个关键词独立过 BM25 和模糊搜索，命中任一关键词的实体都会进入候选
+- 空格相当于 OR 语义：命中关键词越多，加权融合得分越高
+
+```javascript
+// 查询 "功能主义 涂尔干" 的分词过程
+cleanText("功能主义 涂尔干")           // → "功能主义涂尔干"
+whitespaceTokens: ["功能主义", "涂尔干"]
+fullQuery: "功能主义涂尔干"              // 全词兜底
+// 每个 token 独立 n-gram:
+// "功能主义" → "功能主义", "功能", "能主", "主义"
+// "涂尔干"   → "涂尔干", "涂尔", "尔干"
 ```
 
 ### 3.3 Gram 惩罚机制
@@ -214,7 +230,54 @@ buildIndex(entities, observations) {
 }
 ```
 
-### 4.3 BM25 得分计算
+### 4.3 观察正文索引与查询的差异
+
+观察正文（observation content）是搜索的主要目标。索引端和查询端对正文的处理存在关键差异：
+
+**索引端 `tokenizeForIndex()`**：对全文直接 n-gram，**不按空格分词**。
+
+```javascript
+function tokenizeForIndex(text) {
+    const cleaned = cleanText(text);  // 去标点、压缩空格
+    const tokens = new Set();
+    tokens.add(cleaned);              // 全文兜底
+
+    // 对全文直接增量 n-gram（不按空格拆分）
+    if (cleaned.length >= 3) generateNGram(cleaned, 2).forEach(g => tokens.add(g));
+    if (cleaned.length >= 4) generateNGram(cleaned, 3).forEach(g => tokens.add(g));
+    if (cleaned.length >= 5) generateNGram(cleaned, 4).forEach(g => tokens.add(g));
+
+    return Array.from(tokens).filter(t => t.length >= 2);
+}
+```
+
+**查询端 `tokenizeQuery()`**：先按空格切分 whitespace tokens，再对每个 token 分别 n-gram。
+
+```javascript
+// 查询端先按空格分词
+const whitespaceTokens = cleaned.split(/\s+/).filter(t => t.length > 0);
+whitespaceTokens.forEach(token => {
+    // 再对每个 token 增量 n-gram
+    if (token.length >= 3) generateNGram(token, 2).forEach(g => tokens.add(g));
+    if (token.length >= 4) generateNGram(token, 3).forEach(g => tokens.add(g));
+    if (token.length >= 5) generateNGram(token, 4).forEach(g => tokens.add(g));
+});
+```
+
+**设计意图**：
+
+| | 索引端 | 查询端 |
+|--|--------|--------|
+| 空格处理 | 不拆分，全文 n-gram | 先按空格拆分 |
+| 目的 | 覆盖跨词 n-gram 匹配 | 减少噪声，保留词组边界 |
+| 中文表现 | 能匹配跨词边界的中文字符序列 | 按语义单元查询 |
+| 英文表现 | 产生较多噪声（如 "Graph" 的 "ra"、"ap" 匹配不相关词汇） | 按单词查询更自然 |
+
+例如存储 `"Knowledge Graph Management"`，索引端会生成 `Kn`、`no`、`ow`、`wle`... 等跨越词边界的 2-gram；查询 `"Graph"` 时查询端对这个单词生成 `Gr`、`ra`、`ap`、`ph`、`Gra`...，BM25 的 IDF 机制会压制高频通用 gram（如 `ra`、`ap`），保留有区分度的 gram。
+
+**中文的优势**：中文单字即语义单位，全文 n-gram 不存在"跨词边界"的问题（中文本身无空格），n-gram 自然覆盖语义连续区域。这也是《苦涩的教训》的体现 — 通用 n-gram 方案对中文"恰好好用"，无需语言学知识。
+
+### 4.4 BM25 得分计算
 
 ```javascript
 _bm25(token, docId) {
@@ -300,12 +363,12 @@ graph.relations.forEach(r => {
 |------|--------|------|
 | `query` | 必填 | 搜索查询字符串 |
 | `time` | false | 是否包含观察内容的时间戳 |
-| `basicFetch` | false | 是否使用传统关键词搜索 |
+| `legacyGrep` | false | 是否使用传统关键词搜索 |
 | `limit` | 15 | 最大返回实体数量 |
 | `maxObservationsPerEntity` | 5 | 每个实体最多返回的观察数量 |
 | `bm25Weight` | 0.7 | BM25 搜索的权重系数 |
 | `fuzzyWeight` | 0.3 | 模糊搜索的权重系数 |
-| `minScore` | 0.01 | 最小相关性得分阈值 |
+| `minScore` | 0.1 | 最小相关性得分阈值 |
 
 ### 7.2 数量限制
 
@@ -350,21 +413,43 @@ graph.relations.forEach(r => {
 
 ### 8.2 内部调试信息
 
+混合搜索模式 (`legacyGrep=false`) 的 `_meta`:
+
 ```javascript
 _meta: {
-    basicFetch: boolean,
+    query: string,                   // 原始查询字符串
+    fullQuery: string,               // 清洗后的完整查询
+    terms: string[],                 // gram tokens
+    totalCandidates: number,         // 候选实体总数
+    returnedCount: number,           // 返回的直接匹配实体数
+    relatedEntitiesCount: number,    // 关联实体数（通过关系连接）
+    bm25Weight: number,              // BM25 权重（默认 0.7）
+    fuzzyWeight: number,             // 模糊搜索权重（默认 0.3）
+    minScore: number,                // 实际使用的最小得分阈值
+    limit: number,                   // 最大返回实体数
+    indexStatus: 'ready' | 'rebuilding',  // 索引状态
+    rebuildScheduled: boolean,       // 是否有重建任务待处理
+    timestamp: string,               // 搜索执行时间
+    tokenization: [{                 // 每 token 的搜索统计
+        term: string,
+        isFullQuery: boolean,
+        tfidfCount: number,
+        fuseCount: number
+    }]
+}
+```
+
+传统搜索模式 (`legacyGrep=true`) 的 `_meta`:
+
+```javascript
+_meta: {
+    searchMode: 'traditional',       // 标识当前模式
     totalCandidates: number,
     returnedCount: number,
     relatedEntitiesCount: number,
     bm25Weight: number,
     fuzzyWeight: number,
-    timestamp: string,
-    debug: {
-        terms: string[],           // gram tokens
-        tokenizationDetails: [     // 每 token 的搜索统计
-            { term, isFullQuery, tfidfCount, fuseCount }
-        ]
-    }
+    timestamp: string
 }
 ```
 
@@ -372,7 +457,7 @@ _meta: {
 
 ### 9.1 传统搜索模式
 
-当 `basicFetch=true` 时，使用关键词包含匹配：
+当 `legacyGrep=true` 时，使用关键词包含匹配：
 
 ```javascript
 const keywords = query.split(/\s+/).filter(k => k.length >= 2);
@@ -382,7 +467,7 @@ if (keywords.some(kw => entity.name.toLowerCase().includes(kw.toLowerCase()))) {
 }
 ```
 
-## 十、最近更新 (2026-03)
+## 十、2.4.12 版本更新记录
 
 ### 10.1 Gram Tokenization
 

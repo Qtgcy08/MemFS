@@ -1898,11 +1898,11 @@ server.registerTool("listGraph", {
 // Register search_nodes tool
 server.registerTool("searchNode", {
     title: "Search Node",
-    description: "Search entities using BM25 + Fuse.js hybrid search with relevance scoring. Returns sorted results with related entities and observations. Use basicFetch=true for traditional keyword matching.",
+    description: "Search entities using BM25 + Fuse.js hybrid search with relevance scoring. Returns sorted results with related entities and observations. Use legacyGrep=true for traditional keyword matching.",
     inputSchema: {
         query: z.string().describe("The search query to match against entity names, types, definitions, and observation content"),
         time: z.boolean().optional().default(false).describe("Include observation timestamps (createdAt)"),
-        basicFetch: z.boolean().optional().default(false).describe("Use traditional keyword matching instead of hybrid search"),
+        legacyGrep: z.boolean().optional().default(false).describe("Use traditional keyword matching instead of hybrid search"),
         limit: z.number().optional().default(15).describe("Maximum number of entities to return (default: 15)"),
         maxObservationsPerEntity: z.number().optional().default(5).describe("Maximum observations per entity (default: 5)"),
         totalMultiplier: z.number().optional().default(3).describe("Total output limit multiplier: limit × maxObservationsPerEntity × totalMultiplier (default: 3)"),
@@ -1910,9 +1910,9 @@ server.registerTool("searchNode", {
         fuzzyWeight: z.number().optional().default(0.3).describe("Weight for Fuse.js fuzzy matching (0-1, default: 0.3)"),
         minScore: z.number().optional().default(0.1).describe("Minimum relevance score threshold (default: 0.1)")
     },
-}, async ({ query, time, basicFetch, limit, maxObservationsPerEntity, totalMultiplier, bm25Weight, fuzzyWeight, minScore }) => {
+}, async ({ query, time, legacyGrep, limit, maxObservationsPerEntity, totalMultiplier, bm25Weight, fuzzyWeight, minScore }) => {
     const result = await searchIntegrator.searchNode(query, {
-        basicFetch,
+        legacyGrep,
         time,
         limit,
         maxObservationsPerEntity,

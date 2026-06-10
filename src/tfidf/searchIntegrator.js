@@ -6,6 +6,16 @@
 import { HybridSearchService } from './hybridSearchService.js';
 import { TraditionalSearcher } from './traditionalSearch.js';
 
+function formatIndexSize(sizeBytes) {
+    if (sizeBytes >= 1024 * 1024) {
+        return `${(sizeBytes / (1024 * 1024)).toFixed(2)} MB`;
+    }
+    if (sizeBytes >= 1024) {
+        return `${(sizeBytes / 1024).toFixed(2)} KB`;
+    }
+    return `${sizeBytes} B`;
+}
+
 /**
  * Format timestamp object to string for API response
  * Input: {utc: "ISO8601", timezone: "IANA"} or string or null
@@ -60,13 +70,18 @@ export class SearchIntegrator {
 
     /**
      * Ensure index is built
+     * @param {string} label - Label for log message (default: 'Index built')
      */
-    async ensureIndex() {
+    async ensureIndex(label = 'Index built') {
         if (this.isIndexed) return;
 
+        const startTime = Date.now();
         const graph = await this.manager.loadGraph();
         await this.hybridService.buildIndex(graph.entities, graph.observations);
         this.isIndexed = true;
+        const elapsed = Date.now() - startTime;
+        const indexSizeStr = formatIndexSize(this.getIndexSize());
+        console.error(`[MCP Server] ${label}: ${indexSizeStr} in ${elapsed}ms at ${new Date().toISOString()}`);
     }
 
     /**
@@ -83,7 +98,7 @@ export class SearchIntegrator {
      */
     async searchNode(query, options = {}) {
         const {
-            basicFetch = false,  // Default: hybrid search
+            legacyGrep = false,  // Default: hybrid search
             time = false,
             limit = 15,          // Default: 15 results
             maxObservationsPerEntity = 5,  // Default: 5 per entity
@@ -98,7 +113,7 @@ export class SearchIntegrator {
         const graph = await this.manager.loadGraph();
 
         // Mode selection
-        if (basicFetch) {
+        if (legacyGrep) {
             // Traditional search mode
             const result = this.traditionalSearcher.search(query, graph, {
                 time,
@@ -378,8 +393,9 @@ export class SearchIntegrator {
         
         setTimeout(async () => {
             try {
-                await this.ensureIndex();
-                console.error('[MCP Server] Search index rebuilt');
+                // ensureIndex logs 'Index rebuilt' when label is passed
+                // If already indexed (e.g. by a concurrent searchNode call), returns silently
+                await this.ensureIndex('Index rebuilt');
             } catch (e) {
                 console.error('[MCP Server] Index rebuild failed:', e.message);
             } finally {

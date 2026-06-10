@@ -207,13 +207,13 @@ async function test() {
         console.log('[DEBUG] limit=3, entities:', entityCount);
         assert(entityCount <= 10, "limit 参数对实体生效（允许略多因为相关实体）");
 
-        // basicFetch 传统搜索
+        // legacyGrep 传统搜索
         const result4 = await client.callTool('searchNode', { 
             query: "JavaScript",
-            basicFetch: true
+            legacyGrep: true
         });
         const data4 = parseToolResult(result4);
-        assert(data4.searchMode === 'traditional', "basicFetch=true 使用传统搜索");
+        assert(data4.searchMode === 'traditional', "legacyGrep=true 使用传统搜索");
 
         // ============================================================
         // 第四部分：模糊搜索

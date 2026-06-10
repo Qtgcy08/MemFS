@@ -40,25 +40,48 @@ flowchart TD
 #### 2.1.2 全部操作通过 MCP 暴露
 
 MemFS 的每一个功能都是一个 MCP 工具，共计 17 个工具：
-| 类别     | 工具名称                   | 功能描述              | 典型使用场景      |
-| ------ | ---------------------- | ----------------- | ----------- |
-| **创建** | `createEntity`         | 批量创建实体（概念、人物、文献）  | 添加新知识条目     |
-|        | `createRelation`       | 建立实体间的关联关系        | 标记引用、影响、对比等 |
-|        | `addObservation`       | 向已有实体添加观察内容       | 补充阅读笔记、细节描述 |
-| **读取** | `searchNode`           | 混合检索（BM25 + 模糊搜索） | 查找相关知识      |
-|        | `readNode`             | 读取指定实体的完整信息       | 获取详细属性和关联   |
-|        | `readObservation`      | 根据 ID 批量读取观察内容      | 核查具体观察内容    |
-|        | `listNode`             | 列出所有实体概览          | 浏览知识库结构     |
-|        | `listGraph`            | 读取整个知识图谱          | 批量导出、数据迁移   |
-| **更新** | `updateNode`           | 更新实体及其观察内容        | 修改定义、更新笔记   |
-|        | `updateObservation`    | 批量更新观察内容          | 批量修正观察信息    |
-| **删除** | `deleteEntity`         | 删除实体及关联关系         | 移除过时或错误条目   |
-|        | `deleteRelation`       | 删除特定关系            | 解除实体间的关联    |
-|        | `unlinkObservation`    | 解除观察链接（保留观察）      | 移除实体引用      |
-|        | `getOrphanObservation` | 查找孤儿观察            | 发现无效数据      |
-|        | `recycleObservation`   | 回收并永久删除观察         | 清理无用数据      |
-| **辅助** | `howWork`              | 获取推荐工作流指导         | 了解系统使用方法    |
-|        | `getConsole`           | 获取缓冲的控制台日志和 Git 提交历史 | 查看自动提交记录、日志去重 |
+
+### 创建类
+
+| 工具 | 功能 | 示例 |
+|------|------|------|
+| `createEntity` | 批量创建实体（可同步添加观察） | 添加概念、人物、文献 |
+| `createRelation` | 建立实体间的关联关系 | 标记引用、对比、影响 |
+| `addObservation` | 向已有实体添加观察内容 | 补充阅读笔记 |
+
+### 读取类
+
+| 工具 | 功能 | 示例 |
+|------|------|------|
+| `searchNode` | BM25 + 模糊混合检索 | 智能搜索相关知识 |
+| `readNode` | 读取指定实体的完整信息 | 获取详细属性和关联 |
+| `readObservation` | 根据 ID 批量读取观察 | 核查具体观察内容 |
+| `listNode` | 列出所有实体概览 | 浏览知识库结构 |
+| `listGraph` | 读取整个知识图谱 | 批量导出、迁移 |
+
+### 更新类
+
+| 工具 | 功能 | 示例 |
+|------|------|------|
+| `updateNode` | 更新实体及其观察（Copy-on-Write） | 修改定义、更新笔记 |
+| `updateObservation` | 批量更新观察内容 | 批量修正信息 |
+
+### 删除类
+
+| 工具 | 功能 | 示例 |
+|------|------|------|
+| `deleteEntity` | 删除实体及关联关系 | 移除过时条目 |
+| `deleteRelation` | 删除特定关系 | 解除关联 |
+| `unlinkObservation` | 解除观察链接（保留观察） | 移除引用 |
+| `getOrphanObservation` | 查找孤儿观察 | 发现无效数据 |
+| `recycleObservation` | 回收并永久删除观察 | 清理无用数据 |
+
+### 辅助工具
+
+| 工具 | 功能 | 示例 |
+|------|------|------|
+| `getConsole` | 获取控制台消息和 Git 提交日志 | 查看自动提交历史 |
+| `howWork` | 获取推荐工作流指导 | 了解系统使用方法 |
 
 **设计理念**：每个工具做一件事，职责清晰。LLM 可以根据对话上下文选择合适的工具，就像人类研究者会查阅笔记、建立联系或整理资料一样。
 
@@ -143,14 +166,16 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 17 个工具：
   }
   ```
   
-  **API 返回格式**（本地时间）：
-  
-  ```json
-  {
-  "value": "2026-02-09 22:02:06 Asia/Shanghai",
-  "type": "createdAt"
-  }
-  ```
+**API 返回格式**（本地时间，与 `createdAt`/`updatedAt` 同级展示）：
+
+```json
+{
+    "id": 1,
+    "content": "研究笔记",
+    "createdAt": "2026-02-09 22:02:06 Asia/Shanghai",
+    "updatedAt": "2026-02-09 22:02:06 Asia/Shanghai"
+}
+```
   
   **JSONL 的优势：**
   
@@ -159,7 +184,7 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 17 个工具：
   | 人类可读   | 每行是一个完整 JSON 对象，可用任何文本编辑器打开 |
   | 流式友好   | 按行读取，无需加载整个文件到内存            |
   | 追加写入   | 适合日志型数据，不会破坏已有内容            |
-  | 版本控制友好 | diff 清晰，便于追溯变更              |
+  | 版本控制友好 | diff 清晰，便于与git配合追溯变更              |
   | 可打印    | 即使打印成纸质文档也易于阅读              |
   
   #### 2.3.2 本地存储的意义
@@ -212,7 +237,8 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 17 个工具：
    | 文献阅读与笔记 | `createEntity` + `addObservation`                          | 建立概念卡片，添加阅读笔记   |
    | 概念辨析与关联 | `createRelation` + `searchNode`                            | 发现概念间的联系，建立知识网络 |
    | 写作引用与核查 | `readNode`                                                 | 快速查阅引用，确保来源可靠   |
-   | 定期整理与更新 | `updateNode` + `getOrphanObservation`+`recycleObservation` | 修正过时内容，清理冗余笔记   |
+    | 定期整理与更新 | `updateNode` + `getOrphanObservation`+`recycleObservation` | 修正过时内容，清理冗余笔记   |
+| 重新归类笔记 | `unlinkObservation` + `addObservation`(link) | 将观察从原实体转移到另一实体 |
    
 ### 2.5 文件系统设计思想的引入
    
@@ -285,7 +311,7 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 17 个工具：
 
 当需要修改一个被多个实体共享的观察时，MemFS 自动创建新副本，避免影响其他实体。
 
-**实现位置**：`index.js` 第 1147-1181 行
+**实现位置**：`index.js`（`KnowledgeGraphManager.updateNode` 方法中的 `observationUpdates` 处理）
 
 **核心算法**：
 
@@ -417,7 +443,7 @@ MemFS 支持在每次保存时自动提交到 Git，实现知识库的历史版�
 
 **环境变量**：`GITAUTOCOMMIT=true`
 
-**实现位置**：`index.js` 第 80-236 行（`gitSync` 对象）
+**实现位置**：`index.js`（`KnowledgeGraphManager` 类中的 `execGit`/`autoCommit` 等方法）
 
 **Commit 格式**：
 
@@ -450,10 +476,9 @@ MemFS 自动配置 Git 用户信息，便于识别提交来源：
 | `user.name` | `memfs-{version}` | `memfs-2.4.12` |
 | `user.email` | `username-memfs@hostname` | `qtgcy-memfs@DESKTOP-XXX` |
 
-**实现代码**：
+**实现代码**（`KnowledgeGraphManager` 中）：
 
 ```javascript
-// index.js 第 174-179 行
 // Configure user (required for commits) - always set even if repo already exists
 // Format: author:"memfs-(version)", email:"username-memfs@hostname"
 const username = userInfo().username;
@@ -547,8 +572,8 @@ flowchart LR
         FS["FuseSearcher\n模糊搜索"]
         FU["加权融合 + 排序"]
     end
-    SN --> |basicFetch=true| TS
-    SN --> |basicFetch=false| HS --> TF
+    SN --> |legacyGrep=true| TS
+    SN --> |legacyGrep=false| HS --> TF
     HS --> FS
     TF --> FU
     FS --> FU
@@ -560,7 +585,7 @@ flowchart LR
 
 - 参数可配置：返回数量、权重、阈值都可调整
 
-- 模式切换：通过 `basicFetch` 参数在混合搜索和传统搜索间切换
+- 模式切换：通过 `legacyGrep` 参数在混合搜索和传统搜索间切换
   
   #### 3.2.3 混合搜索实现
   
