@@ -10,12 +10,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { homedir, hostname, userInfo } from 'os';
 import { execSync, execFileSync } from 'child_process';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { version: VERSION } = require('./package.json');
 
 // Import search modules
 import { SearchIntegrator } from './src/tfidf/searchIntegrator.js';
-
-// Global constants
-const VERSION = "2.5.21";
 
 // Lazily loaded SKILL.md content for howWork tool
 let SKILL_CONTENT = null;
