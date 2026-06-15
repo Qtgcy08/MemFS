@@ -2116,8 +2116,8 @@ if (process.argv.includes('--duplicates')) {
         title: "Analyze Duplicates",
         description: "Analyze duplicate observations, entities, and relations using BM25 mean similarity. Requires --duplicates flag to be available.",
         inputSchema: {
-            threshold: z.number().min(0).max(1).optional().default(0.8)
-                .describe("Minimum similarity score threshold (0-1, default: 0.8)"),
+            threshold: z.number().min(0).max(999).optional().default(0.8)
+                .describe("Minimum raw BM25 similarity threshold (default: 0.8). Distribution in result uses normalized [0,1] scale for readability."),
             scope: z.enum(["observation", "entity", "relation", "all"]).optional().default("all")
                 .describe("Scope of analysis: observation, entity, relation, or all (default: all)"),
             maxPairs: z.number().min(1).max(200).optional().default(50)

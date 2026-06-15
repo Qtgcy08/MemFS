@@ -608,31 +608,33 @@ export class SearchIntegrator {
             p.normalizedScore = parseFloat((p.similarityScore / maxScore).toFixed(4));
         }
 
-        // Build distribution histogram from ALL raw scores (not just trimmed results)
+        // Build distribution histogram from all normalized scores (before maxPairs trim)
+        const allNormScores = allRawScores.map(s => s / maxScore);
         const bins = 10;
-        const hist = new Array(bins).fill(0);
-        for (const s of allRawScores) {
-            const norm = s / maxScore; // normalized by global max
-            if (norm >= 0) hist[Math.min(Math.floor(norm * bins), bins - 1)]++;
+        const normHist = new Array(bins).fill(0);
+        for (const s of allNormScores) {
+            if (s >= 0) normHist[Math.min(Math.floor(s * bins), bins - 1)]++;
         }
-        const totalPairsAboveThreshold = allRawScores.length;
         result.distribution = {
             totalCandidatesChecked: result.stats.candidatesChecked,
-            totalPairsAboveThreshold,
-            maxScore: parseFloat(maxScore.toFixed(4)),
-            minScore: allRawScores.length > 0 ? parseFloat(Math.min(...allRawScores).toFixed(4)) : 0,
-            histogram: hist.map((count, i) => ({
+            totalPairsAboveThreshold: allNormScores.length,
+            totalReturned: result.observationPairs.length + result.entityPairs.length,
+            normalizedRange: {
+                min: allNormScores.length > 0 ? Math.min(...allNormScores) : 0,
+                max: allNormScores.length > 0 ? Math.max(...allNormScores) : 0
+            },
+            histogram: normHist.map((count, i) => ({
                 range: [(i / bins).toFixed(2), ((i + 1) / bins).toFixed(2)],
                 count,
-                pct: totalPairsAboveThreshold > 0 ? parseFloat((count / totalPairsAboveThreshold * 100).toFixed(1)) : 0
+                pct: allNormScores.length > 0 ? parseFloat((count / allNormScores.length * 100).toFixed(1)) : 0
             })).filter(b => b.count > 0).reverse(),
             suggestedThreshold: 0.8
         };
 
         // Sort and trim final results
-        result.observationPairs.sort((a, b) => b.similarityScore - a.similarityScore);
+        result.observationPairs.sort((a, b) => b.normalizedScore - a.normalizedScore);
         result.observationPairs = result.observationPairs.slice(0, maxPairs);
-        result.entityPairs.sort((a, b) => b.similarityScore - a.similarityScore);
+        result.entityPairs.sort((a, b) => b.normalizedScore - a.normalizedScore);
         result.entityPairs = result.entityPairs.slice(0, maxPairs);
 
         // 3. Relation duplicates (exact (from, to) pair with multiple relationTypes)

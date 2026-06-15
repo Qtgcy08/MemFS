@@ -234,8 +234,8 @@ async function test() {
         const highData = parseToolResult(highResult);
         assert(highData, '高 threshold 返回数据存在');
         const highEmpty = (highData.entityPairs || []).length === 0
-            && (highData.observationPairs || []).length === 0
-            && (highData.relationDuplicates || []).length === 0;
+            && (highData.observationPairs || []).length === 0;
+            // relationDuplicates are exact-match, not BM25-based — always valid regardless of threshold
         assert(highEmpty, '高 threshold (99) 无匹配');
 
         // maxPairs=1 应只返回 1 条
