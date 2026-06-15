@@ -51,7 +51,7 @@ function parseToolResult(result) {
 
 async function test() {
     const timestamp = Date.now();
-    const memoryPath = path.join(__dirname, '.test_mcp_hybrid_' + timestamp + '.jsonl');
+    const memoryPath = path.join(__dirname, '.test_mcp_hybrid_' + timestamp);
     
     const client = createMCPClient({
         MEMORY_DIR: memoryPath
@@ -59,7 +59,7 @@ async function test() {
 
     console.log('🧪 MCP 混合搜索测试\n');
     console.log('测试时间: ' + new Date().toISOString());
-    console.log('测试文件: ' + memoryPath);
+    console.log('测试目录: ' + memoryPath);
 
     try {
         await client.start();
