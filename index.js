@@ -1728,8 +1728,6 @@ server.registerTool("getConsole", {
         lines.push('');
         lines.push('🎸 乐正司百曲，绫动万年红 —— 阿绫11周年生日快乐！[v2.4.12]');
         lines.push('🎤 华风夏韵，洛水天依 —— 洛天依14周年生日快乐！[v3.7.12]');
-        lines.push('');
-        lines.push('💡 v3.7.12 彩蛋解密：3.7.12 = 7/12 = 洛天依诞生日(7月12日)。版本号本身就是致敬 ❤️');
     }
     
     return {
@@ -2102,7 +2100,7 @@ server.registerTool("listNode", {
     title: "List Node",
     description: "List all entity names, types, and definitions. Use readNode for detailed observations and relations.",
     inputSchema: {
-        tree: z.boolean().optional().default(false).describe("Return entityType directory tree instead of flat node list")
+        tree: z.boolean().optional().default(true).describe("Return entityType directory tree instead of flat node list")
     },
 }, async ({ tree }) => {
     const nodes = await knowledgeGraphManager.listNode();
