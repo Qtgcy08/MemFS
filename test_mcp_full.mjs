@@ -6,6 +6,7 @@
 import { createMCPClient } from './mcp-client.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { spawn } from 'child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
