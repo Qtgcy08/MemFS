@@ -1,14 +1,3 @@
 {
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "memfs": {
-      "type": "local",
-      "command": ["node", "index.js"],
-      "enabled": true,
-      "environment": {
-        "MEMORY_DIR": "G:/qtgcy/Javascript/MemFS/.memfs",
-        "GITAUTOCOMMIT": "true"
-      }
-    }
-  }
+  "$schema": "https://opencode.ai/config.json"
 }

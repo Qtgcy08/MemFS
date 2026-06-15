@@ -1637,7 +1637,7 @@ console.error = (...args) => {
 // Register getConsole tool
 server.registerTool("getConsole", {
     title: "Get Console",
-    description: "Retrieve buffered server logs and recent git commits.",
+    description: "MemFS server console: retrieve buffered logs and recent git commits.",
     inputSchema: {
         logs: z.number().optional().default(15).describe("Number of recent git commits to show (only when GITAUTOCOMMIT is enabled)"),
         reloadnow: z.boolean().optional().default(false).describe("Force reload graph from disk after external git operations (pull/checkout/merge) — clears memory cache and rebuilds search index"),
@@ -1946,6 +1946,7 @@ server.registerTool("updateNode", {
     description: "Update multiple entities and their observations. Shared observations use copy-on-write to preserve other entity references.",
     inputSchema: {
         updates: withArrayFallback(z.array(z.object({
+            entityName: z.string().describe("The name of the entity to update"),
             name: z.string().optional().describe("New name for the entity"),
             definition: z.string().optional().describe("New definition for the entity"),
             definitionSource: z.string().optional().describe("Source for the definition"),
@@ -2092,6 +2093,16 @@ export async function createManagers(options = {}) {
 }
 
 async function main() {
+    // Parse env→args overrides (args > env priority)
+    const memoryDirIdx = process.argv.indexOf('--memory-dir');
+    if (memoryDirIdx !== -1 && process.argv[memoryDirIdx + 1]) {
+        process.env.MEMORY_DIR = process.argv[memoryDirIdx + 1];
+    }
+    const gitAutoCommitIdx = process.argv.indexOf('--git-autocommit');
+    if (gitAutoCommitIdx !== -1) {
+        process.env.GITAUTOCOMMIT = 'true';
+    }
+
     // Initialize managers
     const { knowledgeGraphManager: manager, searchIntegrator: si } = await createManagers();
     knowledgeGraphManager = manager;
