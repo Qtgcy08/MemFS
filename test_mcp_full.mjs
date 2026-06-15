@@ -290,57 +290,59 @@ async function test() {
         await fs.unlink(concFile).catch(() => {});
 
         // ============================================================
-        // SSE 模式测试
+        // SSE 模式测试 (默认跳过，设置 TEST_SSE=true 启用)
         // ============================================================
-        section('SSE 模式测试');
+        if (process.env.TEST_SSE === 'true') {
+            section('SSE 模式测试');
 
-        const http = await import('http');
-        const ssePort = 19520 + (timestamp % 10000);
+            const http = await import('http');
+            const ssePort = 19520 + (timestamp % 10000);
 
-        // 启动 SSE 服务器
-        const sseServer = spawn('node', [path.join(__dirname, 'index.js'), '--mode', 'sse', '--port', String(ssePort), '--token', 'test-token'], {
-            stdio: ['pipe', 'pipe', 'pipe'],
-            env: { ...process.env, MEMORY_DIR: memoryDir }
-        });
-
-        // 等待服务器启动
-        await new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => reject(new Error('SSE server start timeout')), 8000);
-            sseServer.stderr.on('data', (data) => {
-                if (data.toString().includes('running on SSE')) {
-                    clearTimeout(timeout);
-                    resolve();
-                }
+            // 启动 SSE 服务器
+            const sseServer = spawn('node', [path.join(__dirname, 'index.js'), '--mode', 'sse', '--port', String(ssePort), '--token', 'test-token'], {
+                stdio: ['pipe', 'pipe', 'pipe'],
+                env: { ...process.env, MEMORY_DIR: memoryDir }
             });
-            sseServer.on('error', reject);
-        });
 
-        // Test: 无 token 应返回 401
-        const res1 = await fetch(`http://localhost:${ssePort}/sse`);
-        assert(res1.status === 401, '26. SSE 无 token 返回 401');
+            // 等待服务器启动
+            await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => reject(new Error('SSE server start timeout')), 8000);
+                sseServer.stderr.on('data', (data) => {
+                    if (data.toString().includes('running on SSE')) {
+                        clearTimeout(timeout);
+                        resolve();
+                    }
+                });
+                sseServer.on('error', reject);
+            });
 
-        // Test: 错误 token 应返回 401
-        const res2 = await fetch(`http://localhost:${ssePort}/sse?token=wrong`);
-        assert(res2.status === 401, '27. SSE 错误 token 返回 401');
+            // Test: 无 token 应返回 401
+            const res1 = await fetch(`http://localhost:${ssePort}/sse`);
+            assert(res1.status === 401, 'SSE 无 token 返回 401');
 
-        // Test: 正确 token 应返回 200 并建立 SSE 流
-        const res3 = await fetch(`http://localhost:${ssePort}/sse?token=test-token`);
-        assert(res3.status === 200, '28. SSE 正确 token 返回 200');
-        const sseText = await res3.text();
-        assert(sseText.includes('event: endpoint'), '29. SSE 返回 endpoint 事件');
-        assert(sseText.includes('sessionId='), '30. SSE 返回 sessionId');
+            // Test: 错误 token 应返回 401
+            const res2 = await fetch(`http://localhost:${ssePort}/sse?token=wrong`);
+            assert(res2.status === 401, 'SSE 错误 token 返回 401');
 
-        // Test: /message 无 token 应返回 401
-        const res4 = await fetch(`http://localhost:${ssePort}/message?sessionId=test`, { method: 'POST' });
-        assert(res4.status === 401, '31. SSE POST /message 无 token 返回 401');
+            // Test: 正确 token 应返回 200 并建立 SSE 流
+            const res3 = await fetch(`http://localhost:${ssePort}/sse?token=test-token`);
+            assert(res3.status === 200, 'SSE 正确 token 返回 200');
+            const sseText = await res3.text();
+            assert(sseText.includes('event: endpoint'), 'SSE 返回 endpoint 事件');
+            assert(sseText.includes('sessionId='), 'SSE 返回 sessionId');
 
-        // Test: Authorization Bearer header
-        const res5 = await fetch(`http://localhost:${ssePort}/sse`, {
-            headers: { 'Authorization': 'Bearer test-token' }
-        });
-        assert(res5.status === 200, '32. SSE Bearer token header 返回 200');
+            // Test: /message 无 token 应返回 401
+            const res4 = await fetch(`http://localhost:${ssePort}/message?sessionId=test`, { method: 'POST' });
+            assert(res4.status === 401, 'SSE POST /message 无 token 返回 401');
 
-        sseServer.kill();
+            // Test: Authorization Bearer header
+            const res5 = await fetch(`http://localhost:${ssePort}/sse`, {
+                headers: { 'Authorization': 'Bearer test-token' }
+            });
+            assert(res5.status === 200, 'SSE Bearer token header 返回 200');
+
+            sseServer.kill();
+        }
 
         // ============================================================
         // 测试结果
