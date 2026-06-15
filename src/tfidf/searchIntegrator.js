@@ -511,14 +511,15 @@ export class SearchIntegrator {
         const workerResults = await Promise.all(allWorkers);
 
         // --- Process results ---
+        const allRawScores = [];
         for (const wr of workerResults) {
             if (wr.error) { console.error('[Dedup] Worker error:', wr.error); continue; }
             if (wr.checked !== undefined) {
                 result.stats.candidatesChecked += wr.checked;
             }
+            if (wr.rawScores) allRawScores.push(...wr.rawScores);
             if (wr.pairs) {
                 result.stats.pairsFound += wr.pairs.length;
-                // Infer type: obs pairs have observationA/B, entity pairs have entityA/B
                 if (wr.pairs.length > 0 && 'observationA' in wr.pairs[0]) {
                     result.observationPairs.push(...wr.pairs);
                 } else {
@@ -555,6 +556,7 @@ export class SearchIntegrator {
                 }
             }
             pairs.sort((a, b) => b.score - a.score);
+            allRawScores.push(...pairs.map(p => p.score));
             result.observationPairs = pairs.slice(0, maxPairs).map(p => ({
                 observationA: { id: parseInt(p.docIdA.replace('obs:', ''), 10), content: obsMap.get(p.docIdA) || '' },
                 observationB: { id: parseInt(p.docIdB.replace('obs:', ''), 10), content: obsMap.get(p.docIdB) || '' },
@@ -587,6 +589,7 @@ export class SearchIntegrator {
                 }
             }
             pairs.sort((a, b) => b.score - a.score);
+            allRawScores.push(...pairs.map(p => p.score));
             result.entityPairs = pairs.slice(0, maxPairs).map(p => ({
                 entityA: { name: p.entityNameA, matchedField: 'name', matchedContent: '' },
                 entityB: { name: p.entityNameB, matchedField: 'name', matchedContent: '' },
@@ -597,17 +600,34 @@ export class SearchIntegrator {
         }
 
         // Normalize similarity scores to 0-1 (same approach as searchNode)
-        const allScores = [
-            ...result.observationPairs.map(p => p.similarityScore),
-            ...result.entityPairs.map(p => p.similarityScore)
-        ].filter(s => s > 0);
-        const maxScore = allScores.length > 0 ? Math.max(...allScores) : 1;
+        const maxScore = allRawScores.length > 0 ? Math.max(...allRawScores) : 1;
         for (const p of result.observationPairs) {
             p.normalizedScore = parseFloat((p.similarityScore / maxScore).toFixed(4));
         }
         for (const p of result.entityPairs) {
             p.normalizedScore = parseFloat((p.similarityScore / maxScore).toFixed(4));
         }
+
+        // Build distribution histogram from ALL raw scores (not just trimmed results)
+        const bins = 10;
+        const hist = new Array(bins).fill(0);
+        for (const s of allRawScores) {
+            const norm = s / maxScore; // normalized by global max
+            if (norm >= 0) hist[Math.min(Math.floor(norm * bins), bins - 1)]++;
+        }
+        const totalPairsAboveThreshold = allRawScores.length;
+        result.distribution = {
+            totalCandidatesChecked: result.stats.candidatesChecked,
+            totalPairsAboveThreshold,
+            maxScore: parseFloat(maxScore.toFixed(4)),
+            minScore: allRawScores.length > 0 ? parseFloat(Math.min(...allRawScores).toFixed(4)) : 0,
+            histogram: hist.map((count, i) => ({
+                range: [(i / bins).toFixed(2), ((i + 1) / bins).toFixed(2)],
+                count,
+                pct: totalPairsAboveThreshold > 0 ? parseFloat((count / totalPairsAboveThreshold * 100).toFixed(1)) : 0
+            })).filter(b => b.count > 0).reverse(),
+            suggestedThreshold: 0.8
+        };
 
         // Sort and trim final results
         result.observationPairs.sort((a, b) => b.similarityScore - a.similarityScore);

@@ -182,13 +182,14 @@ async function main() {
         }
 
         pairs.sort((a, b) => b.score - a.score);
+        const rawScores = pairs.map(p => p.score);
         const om = new Map(obsMap);
         const resolved = pairs.slice(0, maxPairs).map(p => ({
             observationA: { id: parseInt(p.docIdA.replace('obs:', ''), 10), content: om.get(p.docIdA) || '' },
             observationB: { id: parseInt(p.docIdB.replace('obs:', ''), 10), content: om.get(p.docIdB) || '' },
             similarityScore: parseFloat(p.score.toFixed(4))
         }));
-        parentPort.postMessage({ pairs: resolved, checked: seen.size });
+        parentPort.postMessage({ pairs: resolved, checked: seen.size, rawScores });
     } else if (mode === 'entity') {
         const { entityNames, start, end, threshold, maxPairs } = workerData;
         const pairs = [];
@@ -219,6 +220,7 @@ async function main() {
         }
 
         pairs.sort((a, b) => b.score - a.score);
+        const rawScores = pairs.map(p => p.score);
         const top = pairs.slice(0, maxPairs).map(p => {
             const dA = idx.documents.get(p.docA);
             const dB = idx.documents.get(p.docB);
@@ -228,7 +230,7 @@ async function main() {
                 similarityScore: parseFloat(p.score.toFixed(4))
             };
         });
-        parentPort.postMessage({ pairs: top, checked });
+        parentPort.postMessage({ pairs: top, checked, rawScores });
     }
 }
 
