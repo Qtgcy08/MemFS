@@ -168,7 +168,7 @@ async function test() {
             assert(true, '9. readObservation 跳过（无观察）');
         }
 
-        const listResult = await client.callTool('listNode', {});
+        const listResult = await client.callTool('listNode', { tree: false });
         const listData = parseToolResult(listResult);
         const listNodes = listData?.nodes || listData;
         assert(listNodes && listNodes.length >= 3, '10. listNode 列出实体');

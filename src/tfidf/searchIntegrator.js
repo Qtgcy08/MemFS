@@ -345,12 +345,14 @@ export class SearchIntegrator {
             // Take top totalObsLimit observations
             matchedObservations = scoredObservations
                 .slice(0, totalObsLimit)
-                .map(item => ({
-                    id: item.id,
-                    content: item.obs.content,
-                    createdAt: time ? (formatTimestampForApi(item.obs.createdAt) ?? null) : null,
-                    updatedAt: time ? (formatTimestampForApi(item.obs.updatedAt) ?? null) : null
-                }));
+                .map(item => {
+                    if (!time) return { id: item.id, content: item.obs.content };
+                    const createdAt = formatTimestampForApi(item.obs.createdAt) ?? null;
+                    const updatedAt = formatTimestampForApi(item.obs.updatedAt) ?? null;
+                    const result = { id: item.id, content: item.obs.content, createdAt };
+                    if (updatedAt !== null) result.updatedAt = updatedAt;
+                    return result;
+                });
         }
 
         return {

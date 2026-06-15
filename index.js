@@ -290,20 +290,21 @@ const gitSync = {
 // - New format: {utc, timezone} -> converts to local time with IANA timezone
 function formatObservations(observations, includeTime = false) {
     return observations.map(o => {
+        if (!includeTime) return { id: o.id, content: o.content };
         let createdAt = null, updatedAt = null;
-        if (includeTime) {
-            if (o.createdAt && typeof o.createdAt === 'object' && o.createdAt.utc) {
-                createdAt = formatWithTimezone(o.createdAt.utc, o.createdAt.timezone);
-            } else if (o.createdAt && typeof o.createdAt === 'string') {
-                createdAt = o.createdAt;
-            }
-            if (o.updatedAt && typeof o.updatedAt === 'object' && o.updatedAt.utc) {
-                updatedAt = formatWithTimezone(o.updatedAt.utc, o.updatedAt.timezone);
-            } else if (o.updatedAt && typeof o.updatedAt === 'string') {
-                updatedAt = o.updatedAt;
-            }
+        if (o.createdAt && typeof o.createdAt === 'object' && o.createdAt.utc) {
+            createdAt = formatWithTimezone(o.createdAt.utc, o.createdAt.timezone);
+        } else if (o.createdAt && typeof o.createdAt === 'string') {
+            createdAt = o.createdAt;
         }
-        return { id: o.id, content: o.content, createdAt, updatedAt };
+        if (o.updatedAt && typeof o.updatedAt === 'object' && o.updatedAt.utc) {
+            updatedAt = formatWithTimezone(o.updatedAt.utc, o.updatedAt.timezone);
+        } else if (o.updatedAt && typeof o.updatedAt === 'string') {
+            updatedAt = o.updatedAt;
+        }
+        const result = { id: o.id, content: o.content, createdAt };
+        if (updatedAt !== null) result.updatedAt = updatedAt;
+        return result;
     });
 }
 
@@ -2022,12 +2023,14 @@ server.registerTool("readObservation", {
     const observations = await knowledgeGraphManager.readObservation(ids);
     
     // Conditionally include createdAt
-    const result = observations.map(o => ({
-        id: o.id,
-        content: o.content,
-        createdAt: time ? formatTimestamp(o.createdAt)?.value : null,
-        updatedAt: time ? (formatTimestamp(o.updatedAt)?.value ?? null) : null
-    }));
+    const result = observations.map(o => {
+        if (!time) return { id: o.id, content: o.content };
+        const createdAt = formatTimestamp(o.createdAt)?.value ?? null;
+        const updatedAt = formatTimestamp(o.updatedAt)?.value ?? null;
+        const base = { id: o.id, content: o.content, createdAt };
+        if (updatedAt !== null) base.updatedAt = updatedAt;
+        return base;
+    });
     
     return {
         content: [{ type: "text", text: JSON.stringify({ observations: result }, null, 2) }],
@@ -2056,10 +2059,13 @@ server.registerTool("updateObservation", {
             observationId: r.observationId,
             oldContent: r.oldContent,
             newContent: r.newContent,
-            linkedEntities: r.linkedEntities,
-            updatedAt: formatTimestamp(r.updatedAt)?.value,
-            createdAt: time ? formatTimestamp(r.createdAt)?.value : null
+            linkedEntities: r.linkedEntities
         };
+        if (time) {
+            base.createdAt = formatTimestamp(r.createdAt)?.value ?? null;
+            const updatedAt = formatTimestamp(r.updatedAt)?.value;
+            if (updatedAt) base.updatedAt = updatedAt;
+        }
         return base;
     });
     
