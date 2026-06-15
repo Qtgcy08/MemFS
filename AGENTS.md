@@ -8,7 +8,7 @@
 
 - `index.js` (~2250 lines) contains everything: `KnowledgeGraphManager` class, 17 MCP tool handlers, all utilities. No framework, no codegen.
 - Tools: `createEntity` `createRelation` `addObservation` `deleteEntity` `deleteRelation` `unlinkObservation` `recycleObservation` `getOrphanObservation` `readNode` `readObservation` `listNode` `listGraph` `searchNode` `updateNode` `updateObservation` `howWork` `getConsole`
-- `analyzeDuplicates` (optional, `--duplicates` flag): BM25 mean-similarity dedup tool for observations, entities, and relations
+- `analyzeDuplicates` (optional, `--duplicates` flag): BM25 mean-similarity dedup tool for observations, entities, and relations. Default threshold 0.8 (normalized).
 - `howWork` returns `skills/memfs_best_practices/SKILL.md` (lazy-loaded)
 - `**XX**` in text fields (definition/observation) → BM25 ×1.5 weighted atomic token, no-gram, transparent to search
 - Field weights: name 5.0, entityType 2.5, definition 2.5, definitionSource 1.5, observation 1.0

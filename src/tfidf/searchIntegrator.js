@@ -422,7 +422,7 @@ export class SearchIntegrator {
      * Analyze duplicates across observations, entities, and relations
      * Uses BM25 mean similarity + inverted index pre-filtering
      */
-    async analyzeDuplicates({ threshold = 0.4, scope = 'all', maxPairs = 50 } = {}) {
+    async analyzeDuplicates({ threshold = 0.8, scope = 'all', maxPairs = 50 } = {}) {
         const startTime = Date.now();
         const graph = await this.manager.loadGraph();
         await this.ensureIndex();
