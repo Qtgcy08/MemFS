@@ -39,7 +39,7 @@ flowchart TD
 
 #### 2.1.2 全部操作通过 MCP 暴露
 
-MemFS 的每一个功能都是一个 MCP 工具，共计 17 个工具：
+MemFS 的每一个功能都是一个 MCP 工具，共计 18 个工具：
 
 ### 创建类
 
@@ -82,6 +82,7 @@ MemFS 的每一个功能都是一个 MCP 工具，共计 17 个工具：
 |------|------|------|
 | `getConsole` | 获取控制台消息和 Git 提交日志 | 查看自动提交历史 |
 | `howWork` | 获取推荐工作流指导 | 了解系统使用方法 |
+| `analyzeDuplicates` | BM25 均值相似度查重（需 `--duplicates` 参数） | 发现近似重复的观察/实体/关系 |
 
 **设计理念**：每个工具做一件事，职责清晰。LLM 可以根据对话上下文选择合适的工具，就像人类研究者会查阅笔记、建立联系或整理资料一样。
 
@@ -441,7 +442,19 @@ await updateNode({
 
 MemFS 支持在每次保存时自动提交到 Git，实现知识库的历史版本管理。
 
-**环境变量**：`GITAUTOCOMMIT=true`
+**默认启用**：可通过 `--git-autocommit` CLI 参数或 `GITAUTOCOMMIT=true` 环境变量开启。
+
+**配置优先级**：`args > env > default`
+
+```bash
+# 推荐：CLI 参数方式
+node index.js --memory-dir ~/my-knowledge --git-autocommit --autogc 20
+
+# 或环境变量方式（向后兼容）
+GITAUTOCOMMIT=true node index.js
+```
+
+**自动 GC**：`--autogc <N>` 参数可在每 N 次 auto-commit 后自动运行 `git gc --auto`（默认 20 次）。Fire-and-forget 模式，不阻塞操作管线。
 
 **实现位置**：`index.js`（`KnowledgeGraphManager` 类中的 `execGit`/`autoCommit` 等方法）
 
@@ -473,7 +486,7 @@ MemFS 自动配置 Git 用户信息，便于识别提交来源：
 
 | 配置项 | 格式 | 示例 |
 |-----|------|------|
-| `user.name` | `memfs-{version}` | `memfs-2.4.12` |
+| `user.name` | `memfs-{version}` | `memfs-3.7.12` |
 | `user.email` | `username-memfs@hostname` | `qtgcy-memfs@DESKTOP-XXX` |
 
 **实现代码**（`KnowledgeGraphManager` 中）：
@@ -674,13 +687,13 @@ if (needsMigration) {
 
 - **不支持实时同步**：依赖文件系统作为"真相源"
   
-### 5.3 2.4.12 版本更新
+### 5.3 2.4.12 版本更新（保留历史参考）
 
   2.4.12 是 MemFS 的重大更新版本，包含以下核心改动：
 
-#### Git Auto-Commit
+#### Git Auto-Commit（环境变量方式）
 
-  - 环境变量：`GITAUTOCOMMIT=true`
+  - 环境变量：`GITAUTOCOMMIT=true`（v3.7.12 已扩展为 CLI 参数 `--git-autocommit`）
   - 每次 `saveGraph()` 自动提交到 Git
   - 提交格式：`auto-sync: (operation_type "details") at UTC YYYY-MM-DDTHH:mm:ss.SSSZ`
   - 实体名称用双引号包裹，如 `"Weber"`
@@ -727,6 +740,23 @@ if (needsMigration) {
   - `getConsole` 新增工具
   - 消息去重（Set）
   - trim 后去重
+
+### 5.3.1 v3.7.12 版本更新
+
+v3.7.12 是 v2.4.12 之后的架构升级版本，核心变化：
+
+| 特性 | 说明 |
+|------|------|
+| **CLI 参数体系** | `--memory-dir` / `--git-autocommit` / `--duplicates` / `--autogc`，优先级 args > env |
+| **SSE 模式** | HTTP SSE 传输层 + token 认证，`--mode sse --port 3100 --token xxx` |
+| **entityType 多维路径** | 文件系统风格分类：`/社会学/人物/|/经济学/人物/`，Zod 自动格式化 |
+| **XX 语义标记** | Markdown 加粗作为语义标签，BM25 权重 ×1.5，零 Schema 改动 |
+| **analyzeDuplicates 查重** | BM25 均值相似度（N-gram Weighted Mean），Worker 线程并行计算 |
+| **--autogc 自动 GC** | 每 N 次 auto-commit 后异步执行 `git gc --auto`，默认 20 |
+| **listNode 默认树视图** | 默认返回 entityType 目录树，含 _count 密度指示 |
+| **time 参数清理** | `time=false` 省略时间字段，`time=true` 时 `updatedAt` 为 null 不输出 |
+| **18 个 MCP 工具** | 新增 `analyzeDuplicates` |
+| **MCP SDK 升级** | @modelcontextprotocol/sdk ^1.0.0 → ^1.29.0 |
 
 ### 5.4 未来可能的扩展方向
 
