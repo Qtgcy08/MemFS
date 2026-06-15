@@ -2109,9 +2109,31 @@ server.registerTool("howWork", {
         jsonContent: { workflow }
     };
 });
+
+// Register analyzeDuplicates tool (optional, enabled via --duplicates flag)
+if (process.argv.includes('--duplicates')) {
+    server.registerTool("analyzeDuplicates", {
+        title: "Analyze Duplicates",
+        description: "Analyze duplicate observations, entities, and relations using BM25 mean similarity. Requires --duplicates flag to be available.",
+        inputSchema: {
+            threshold: z.number().min(0).max(1).optional().default(0.4)
+                .describe("Minimum similarity score threshold (0-1, default: 0.4)"),
+            scope: z.enum(["observation", "entity", "relation", "all"]).optional().default("all")
+                .describe("Scope of analysis: observation, entity, relation, or all (default: all)"),
+            maxPairs: z.number().min(1).max(200).optional().default(50)
+                .describe("Maximum pairs to return per scope (default: 50)")
+        },
+    }, async ({ threshold, scope, maxPairs }) => {
+        const result = await searchIntegrator.analyzeDuplicates({ threshold, scope, maxPairs });
+        return {
+            content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+            jsonContent: result
+        };
+    });
+}
 /**
  * Create and initialize managers (for programmatic use / visualizer)
- * Returns { knowledgeGraphManager, searchIntegrator }
+ * Returns { knowledgeGraphManager, searchIntegrator, memoryDir }
  */
 export async function createManagers(options = {}) {
     const memoryPath = options.memoryPath || await ensureMemoryFilePath();
@@ -2135,7 +2157,7 @@ export async function createManagers(options = {}) {
     const searchIntegrator = new SearchIntegrator(knowledgeGraphManager);
     knowledgeGraphManager.searchIntegrator = searchIntegrator;
     
-    return { knowledgeGraphManager, searchIntegrator };
+    return { knowledgeGraphManager, searchIntegrator, memoryDir };
 }
 
 async function main() {
@@ -2150,7 +2172,7 @@ async function main() {
     }
 
     // Initialize managers
-    const { knowledgeGraphManager: manager, searchIntegrator: si } = await createManagers();
+    const { knowledgeGraphManager: manager, searchIntegrator: si, memoryDir } = await createManagers();
     knowledgeGraphManager = manager;
     searchIntegrator = si;
     
@@ -2222,6 +2244,7 @@ async function main() {
     
     console.error(`[Stats] ${entityCount} entities | ${observationCount} observations | ${relationCount} relations | last updated ${lastUpdated} | over startup at [utc:${startupUtc}]`);
     console.error(`[Stats] Index size: ${indexSizeStr}`);
+    console.error(`[MCP Server] Memory directory: ${memoryDir}`);
 }
 
 // Exports for testing

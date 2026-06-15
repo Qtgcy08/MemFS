@@ -413,4 +413,190 @@ export class SearchIntegrator {
             isIndexed: this.isIndexed
         };
     }
+
+    /**
+     * Analyze duplicates across observations, entities, and relations
+     * Uses BM25 mean similarity + inverted index pre-filtering
+     */
+    async analyzeDuplicates({ threshold = 0.4, scope = 'all', maxPairs = 50 } = {}) {
+        const startTime = Date.now();
+        const graph = await this.manager.loadGraph();
+        await this.ensureIndex();
+
+        const bm25 = this.hybridService.tfidfSearcher;
+        const result = {
+            observationPairs: [],
+            entityPairs: [],
+            relationDuplicates: [],
+            stats: { duration: 0, candidatesChecked: 0, pairsFound: 0 }
+        };
+
+        // 1. Observation duplicates
+        if (scope === 'all' || scope === 'observation') {
+            const obsDocIds = [];
+            bm25.documents.forEach((doc, docId) => {
+                if (docId.startsWith('obs:')) obsDocIds.push(docId);
+            });
+
+            const seen = new Set();
+            const pairs = [];
+
+            for (const docIdA of obsDocIds) {
+                const docA = bm25.documents.get(docIdA);
+                if (!docA) continue;
+
+                // Count shared tokens per candidate
+                // Skip high-frequency tokens (df > 200) to avoid O(n²) explosion on common 2-grams
+                const sharedCount = new Map();
+                for (const token of docA.tokens) {
+                    const df = bm25.docFrequency.get(token) || 0;
+                    if (df > 200) continue;
+                    const docMap = bm25.invertedIndex.get(token);
+                    if (docMap) {
+                        docMap.forEach((_, docId) => {
+                            if (docId !== docIdA && docId.startsWith('obs:')) {
+                                sharedCount.set(docId, (sharedCount.get(docId) || 0) + 1);
+                            }
+                        });
+                    }
+                }
+
+                // Sort by shared token count, take top candidates, only process pairs sharing ≥2 tokens
+                const candidates = Array.from(sharedCount.entries())
+                    .filter(([, count]) => count >= 2)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 100);
+
+                for (const [docIdB] of candidates) {
+                    const pairKey = docIdA < docIdB ? `${docIdA}|${docIdB}` : `${docIdB}|${docIdA}`;
+                    if (seen.has(pairKey)) continue;
+                    seen.add(pairKey);
+
+                    const score = bm25.computeDocSimilarity(docIdA, docIdB);
+                    if (score >= threshold) {
+                        pairs.push({ docIdA, docIdB, score });
+                    }
+                }
+            }
+
+            pairs.sort((a, b) => b.score - a.score);
+            const topPairs = pairs.slice(0, maxPairs);
+
+            // Resolve observation content
+            const obsMap = new Map();
+            graph.observations.forEach(o => obsMap.set(o.id, o.content));
+
+            result.observationPairs = topPairs.map(p => ({
+                observationA: { id: parseInt(p.docIdA.replace('obs:', '')), content: obsMap.get(parseInt(p.docIdA.replace('obs:', ''))) },
+                observationB: { id: parseInt(p.docIdB.replace('obs:', '')), content: obsMap.get(parseInt(p.docIdB.replace('obs:', ''))) },
+                similarityScore: parseFloat(p.score.toFixed(4))
+            }));
+
+            result.stats.candidatesChecked += seen.size;
+            result.stats.pairsFound += pairs.length;
+        }
+
+        // 2. Entity duplicates (compare entity field documents)
+        if (scope === 'all' || scope === 'entity') {
+            const entityDocsByName = new Map();
+            bm25.documents.forEach((doc, docId) => {
+                if (docId.startsWith('entity:')) {
+                    if (!entityDocsByName.has(doc.entityName)) {
+                        entityDocsByName.set(doc.entityName, []);
+                    }
+                    entityDocsByName.get(doc.entityName).push({ docId, doc });
+                }
+            });
+
+            const entityNames = Array.from(entityDocsByName.keys());
+            const seen = new Set();
+            const pairs = [];
+
+            for (let i = 0; i < entityNames.length; i++) {
+                for (let j = i + 1; j < entityNames.length; j++) {
+                    const nameA = entityNames[i];
+                    const nameB = entityNames[j];
+
+                    // Compute max similarity across all field combinations
+                    let maxScore = 0;
+                    let bestPair = { docIdA: null, docIdB: null };
+
+                    for (const entryA of entityDocsByName.get(nameA)) {
+                        for (const entryB of entityDocsByName.get(nameB)) {
+                            const pairKey = entryA.docId < entryB.docId
+                                ? `${entryA.docId}|${entryB.docId}`
+                                : `${entryB.docId}|${entryA.docId}`;
+                            if (seen.has(pairKey)) continue;
+                            seen.add(pairKey);
+
+                            const score = bm25.computeDocSimilarity(entryA.docId, entryB.docId);
+                            if (score > maxScore) {
+                                maxScore = score;
+                                bestPair = { docIdA: entryA.docId, docIdB: entryB.docId };
+                            }
+                        }
+                    }
+
+                    if (maxScore >= threshold) {
+                        pairs.push({
+                            entityNameA: nameA,
+                            entityNameB: nameB,
+                            score: maxScore,
+                            docIdA: bestPair.docIdA,
+                            docIdB: bestPair.docIdB
+                        });
+                    }
+                }
+            }
+
+            pairs.sort((a, b) => b.score - a.score);
+            const topPairs = pairs.slice(0, maxPairs);
+
+            result.entityPairs = topPairs.map(p => {
+                const docA = bm25.documents.get(p.docIdA);
+                const docB = bm25.documents.get(p.docIdB);
+                return {
+                    entityA: { name: p.entityNameA, matchedField: docA?.field || 'name', matchedContent: docA?.content || '' },
+                    entityB: { name: p.entityNameB, matchedField: docB?.field || 'name', matchedContent: docB?.content || '' },
+                    similarityScore: parseFloat(p.score.toFixed(4))
+                };
+            });
+
+            result.stats.candidatesChecked += seen.size;
+            result.stats.pairsFound += pairs.length;
+        }
+
+        // 3. Relation duplicates (exact (from, to) pair with multiple relationTypes)
+        if (scope === 'all' || scope === 'relation') {
+            const relationGroups = new Map();
+            graph.relations.forEach(r => {
+                const key = `${r.from}|${r.to}`;
+                if (!relationGroups.has(key)) {
+                    relationGroups.set(key, { from: r.from, to: r.to, relationTypes: [] });
+                }
+                relationGroups.get(key).relationTypes.push(r.relationType);
+            });
+
+            relationGroups.forEach(group => {
+                const unique = [...new Set(group.relationTypes)];
+                if (unique.length !== group.relationTypes.length) {
+                    const typeCounts = new Map();
+                    group.relationTypes.forEach(t => typeCounts.set(t, (typeCounts.get(t) || 0) + 1));
+                    const duplicates = Array.from(typeCounts.entries())
+                        .filter(([, count]) => count > 1)
+                        .map(([type, count]) => ({ relationType: type, count }));
+                    if (duplicates.length > 0) {
+                        result.relationDuplicates.push({
+                            from: group.from,
+                            to: group.to,
+                            duplicates
+                        });
+                    }
+                }
+            });
+        }
+
+        result.stats.duration = Date.now() - startTime;
+        return result;
+    }
 }

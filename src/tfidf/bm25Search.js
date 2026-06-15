@@ -318,6 +318,26 @@ export class NaturalTfIdfSearcher {
     }
 
     /**
+      * Compute BM25 mean similarity between two indexed documents
+      * Sim(A→B) = Σ BM25(g, B) / |Grams(A)|
+      * Returns max(Sim(A→B), Sim(B→A)) for symmetry
+      */
+    computeDocSimilarity(docIdA, docIdB) {
+        const docA = this.documents.get(docIdA);
+        const docB = this.documents.get(docIdB);
+        if (!docA || !docB) return 0;
+
+        const tokensA = Array.from(docA.tokens);
+        const tokensB = Array.from(docB.tokens);
+        if (tokensA.length === 0 || tokensB.length === 0) return 0;
+
+        const simAB = tokensA.reduce((sum, t) => sum + this._bm25(t, docIdB), 0) / tokensA.length;
+        const simBA = tokensB.reduce((sum, t) => sum + this._bm25(t, docIdA), 0) / tokensB.length;
+
+        return Math.max(simAB, simBA);
+    }
+
+    /**
       * Legacy method - now uses BM25 internally
       * Kept for backward compatibility
       */
