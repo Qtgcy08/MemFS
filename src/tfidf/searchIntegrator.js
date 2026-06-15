@@ -444,7 +444,7 @@ export class SearchIntegrator {
                 if (docId.startsWith('obs:')) obsDocIds.push(docId);
             });
             result._obsDocIds = obsDocIds;
-            result._obsMap = Array.from(graph.observations.map(o => [String(o.id), o.content]));
+            result._obsMap = Array.from(graph.observations.map(o => ['obs:' + o.id, o.content]));
         }
         if (entityScope) {
             const entityNames = [];

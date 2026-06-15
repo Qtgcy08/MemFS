@@ -59,6 +59,9 @@ node test_gitsync.mjs
 # Hybrid search specific
 node test_mcp_hybrid_search.mjs
 
+# analyzeDuplicates (opt-in, requires --duplicates arg)
+node test_mcp_dedup.mjs
+
 # Fast syntax check
 node --check index.js
 node --check src/tfidf/bm25Search.js
