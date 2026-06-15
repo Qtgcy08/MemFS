@@ -1,155 +1,96 @@
 # AGENTS.md
 
-**MemFS** - Knowledge graph management system with BM25 + fuzzy search. Inspired by filesystem concepts (inode, hard links, copy-on-write).
+**MemFS** — Knowledge graph management system. One Node.js process, speaks stdio/SSE MCP.
 
-**Stack:** Node.js 22+ ES Modules | MCP SDK | Zod | Fuse.js 7.1.0 | Pure JS BM25
+**Stack:** Node.js 22+ ES Modules | MCP SDK 1.29.0 | Zod | Fuse.js 7.1.0 | Pure JS BM25
 
----
+## Entrypoint & Tools
 
-## Build, Lint, and Test
+- `index.js` (~2250 lines) contains everything: `KnowledgeGraphManager` class, 17 MCP tool handlers, all utilities. No framework, no codegen.
+- Tools: `createEntity` `createRelation` `addObservation` `deleteEntity` `deleteRelation` `unlinkObservation` `recycleObservation` `getOrphanObservation` `readNode` `readObservation` `listNode` `listGraph` `searchNode` `updateNode` `updateObservation` `howWork` `getConsole`
+- `howWork` returns `skills/memfs_best_practices/SKILL.md` (lazy-loaded)
+- `**XX**` in text fields (definition/observation) → BM25 ×1.5 weighted atomic token, no-gram, transparent to search
+- Field weights: name 5.0, entityType 2.5, definition 2.5, definitionSource 1.5, observation 1.0
 
-```bash
-npm install
+## Search Modules (src/tfidf/)
 
-# Run server
-node index.js
-
-# With custom memory directory and git auto-commit
-MEMORY_DIR=~/data GITAUTOCOMMIT=true node index.js
-```
-
-### Testing
-```bash
-# Syntax check (fast) on changed files
-node --check index.js
-node --check src/tfidf/traditionalSearch.js
-
-# Full test suite (25 assertions across 17 MCP tools)
-node test_mcp_full.mjs
-
-# Git Sync tests
-node test_gitsync.mjs
-
-# Hybrid search specific tests
-node test_mcp_hybrid_search.mjs
-```
-
-**Test prerequisite:** `test_cache/mcp-client.js` must be copied to root before running tests from project root:
-```bash
-cp test_cache/mcp-client.js . && MEMORY_DIR=test_cache node test_mcp_full.mjs
-```
-
-### Test Files
-| File | Purpose |
-|------|---------|
-| `test_mcp_full.mjs` | 25 assertions across all MCP tools + Git Sync |
-| `test_gitsync.mjs` | Git auto-commit scenarios |
-| `test_mcp_hybrid_search.mjs` | Hybrid search specific tests |
-| `test_cache/` | Isolated test directory with own git repo and mcp-client.js |
-| `debug_search.html` | Web UI for debugging searchNode (open in browser) |
-| `src/converters/relations_export.js` | Export relations to Graphviz DOT format |
-| `./private_test_usages/memory.jsonl` | Test case for `relations_export.js` |
-
----
-
-## Architecture
-
-### All-in-One Entrypoint
-`index.js` (~2250 lines) contains everything: `KnowledgeGraphManager` class, all 17 MCP tool handlers, utility functions, and timestamp formatting. No framework - just a single Node.js process that speaks stdio MCP.
-
-### Search Modules (`src/tfidf/`)
 | File | Role |
 |------|------|
-| `searchIntegrator.js` | Orchestrator - routes to hybrid or traditional search |
-| `hybridSearchService.js` | BM25 + Fuse.js hybrid with gram tokenization; field weights in `DEFAULT_FIELD_WEIGHTS` |
-| `bm25Search.js` | Pure JS BM25 implementation |
+| `hybridSearchService.js` | Orchestrator — BM25 + Fuse fusion, field weights |
+| `bm25Search.js` | Pure JS BM25 with n-gram (2/3/4) tokenization |
 | `fuseSearch.js` | Fuse.js 7.1.0 wrapper |
-| `traditionalSearch.js` | Legacy keyword match fallback |
-| `src/converters/relations_export.js` | Export relations to Graphviz DOT format |
+| `traditionalSearch.js` | Legacy keyword fallback (`legacyGrep` mode) |
+| `searchIntegrator.js` | Routes to hybrid or traditional |
 
-### Data Model (JSONL)
-```jsonl
-{"type":"entity","name":"Weber","entityType":"person","definition":"...","observationIds":[1,2]}
-{"type":"observation","id":1,"content":"...","createdAt":{"utc":"ISO8601","timezone":"Asia/Shanghai"},"updatedAt":{"utc":"ISO8601","timezone":"Asia/Shanghai"}}
-{"type":"relation","from":"Weber","to":"Durkheim","relationType":"contemporary"}
-```
+## entityType Multi-Dimensional Paths
 
-`createdAt`/`updatedAt` are **sibling top-level properties** (not nested). Data layer returns raw `{utc, timezone}` objects; MCP tool handler layer formats to strings.
+`entityType` supports path syntax: `/修饰语/中心语/`, multiple paths via `|`. Older plain strings (`编程语言`) work unchanged.
 
-### Filesystem-Inspired Design
-| Concept | Implementation |
-|---------|---------------|
-| Inode Table | Centralized observation storage |
-| Hard Links | Multi-entity observation sharing |
-| Copy-on-Write | Updates create new observations |
-| Orphan Detection | GC for unused observations |
+- `listNode(tree=true)` returns directory tree instead of flat node list
+- BM25 index extracts path nodes as atomic tokens to avoid n-gram boundary noise
 
----
+## CLI Args (args > env)
 
-## Key Patterns
+| Arg | Env fallback | Description |
+|-----|-------------|-------------|
+| `--memory-dir <path>` | `MEMORY_DIR` | Data directory (default: `~/.memory`) |
+| `--git-autocommit` | `GITAUTOCOMMIT=true` | Enable git auto-commit |
+| `--mode sse` | — | SSE HTTP mode |
+| `--port <n>` | — | SSE port (default 3100) |
+| `--token <str>` | — | SSE auth token |
 
-### MCP Tool Registration
-```javascript
-server.registerTool("tool_name", {
-    title: "Tool Title",
-    description: "Description",
-    inputSchema: z.object({ ... }),
-    outputSchema: z.object({ ... })
-}, async ({ params }) => {
-    const result = await manager.method(params);
-    return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-        structuredContent: result
-    };
-});
-```
+## Testing
 
-### Timestamp Format
-- **Storage**: `{utc: "ISO8601", timezone: "IANA"}` (e.g., "Asia/Shanghai")
-- **API response**: `"YYYY-MM-DD HH:mm:ss Timezone"` (local time with IANA zone)
-- Formatting: `formatTimestamp()` for single objects, `formatObservations()` for arrays
-- `updatedAt` and `createdAt` are separate fields in storage - **both** must be mapped in data layer returns
-
-### VERSION Sync
-`index.js` line 16 has a **hardcoded** `const VERSION = "2.4.16"` that must be manually updated alongside `package.json`. They are out of sync after npm publish.
-
-### Console Logging
-Use `console.error()` with prefixes for auto-level detection:
-- `[GitSync]`, `[MCP Server]`, `[Stats]` → info
-- `[Deprecation]` → warn
-- `DETECTED:` → error
-
-### Git Auto-Commit (GITAUTOCOMMIT)
-- Commit message: `auto-commit:[operationContext] at [utc:...] [tz:Asia/Shanghai]`
-- Git author: `user.name: memfs-{VERSION}`, `user.email: username-memfs@hostname`
-
----
-
-## Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `MEMORY_DIR` | Data storage directory | `~/.memory` |
-| `GITAUTOCOMMIT` | Enable git auto-commit | `false` |
-
----
-
-## Code Style
-
-- **4 spaces**, **single quotes**, **semicolons**, max **100 chars/line**
-- Imports order: stdlib → third-party → local
-- Classes: PascalCase (`KnowledgeGraphManager`), functions/vars: camelCase
-- Constants: UPPER_SNAKE_CASE (`DEFAULT_FIELD_WEIGHTS`, `BM25_K1`)
-- MCP Tools: snake_case (`searchNode`, `recycleObservation`)
-- Never suppress types (`as any`, `@ts-ignore`)
-- Handle specific errors before generic re-throw; `process.exit(1)` for fatal main() errors
-
----
-
-## Publishing (use publish-new skill)
 ```bash
-# Say: "使用 publish-new skill 发布新版本"
-```
-Version bump: feat→minor, fix→patch, BREAKING CHANGE→major
+# Prerequisite
+cp test_cache/mcp-client.js .
 
-Remember to also update `const VERSION = "..."` in `index.js` line 16.
+# Full suite (29 tests, skips SSE by default)
+MEMORY_DIR=test_cache node test_mcp_full.mjs
+
+# SSE tests (opt-in, requires http server)
+TEST_SSE=true MEMORY_DIR=test_cache node test_mcp_full.mjs
+
+# Git sync scenarios
+node test_gitsync.mjs
+
+# Hybrid search specific
+node test_mcp_hybrid_search.mjs
+
+# Fast syntax check
+node --check index.js
+node --check src/tfidf/bm25Search.js
+```
+
+Key testing quirks:
+- SSE test spawns a real HTTP subprocess, skipped unless `TEST_SSE=true`
+- `test_cache/` has its own git repo used as test fixture
+- `mcp-client.js` helper must exist in project root
+
+## Data Model (JSONL)
+
+Three types: `entity` (with `observationIds` array), `observation` (shared inode table), `relation` (from→to→relationType).
+- `createdAt`/`updatedAt`: stored as `{utc, timezone}`, API formats to `"YYYY-MM-DD HH:mm:ss IANA"`
+- Observations are centrally stored, multi-entity via hard-link IDs; copy-on-write on updates
+
+## MCP Tool Pattern
+
+```javascript
+return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+         jsonContent: result };
+```
+No `outputSchema`, no `structuredContent` — always `jsonContent`.
+
+## Code Conventions
+
+4 spaces, single quotes, semicolons, max 100 chars/line. Classes PascalCase, functions camelCase, MCP tools snake_case. `console.error()` prefixes: `[Git]` `[MCP Server]` `[Stats]`. No `as any` or `@ts-ignore`.
+
+## VERSION
+
+`const { version: VERSION } = require('./package.json')` (line 15 of `index.js`). No hardcoded copy.
+
+## Branches
+
+- `dev` — active development (v3.7.12)
+- `master` — stable releases (v2.5.21, fast-forwarded from origin)
+- `legacy` — v1.3.0 archive

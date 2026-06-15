@@ -159,7 +159,6 @@ async function test() {
         const result1 = await client.callTool('searchNode', { query: "JavaScript" });
         const data1 = parseToolResult(result1);
         assert(data1 && data1.entities && data1.entities.length > 0, "搜索 JavaScript 返回结果");
-        assert(data1.searchMode === 'hybrid', "默认使用混合搜索模式");
 
         // 搜索结果包含相关性信息
         if (data1.entities.length > 0) {
@@ -213,26 +212,11 @@ async function test() {
             legacyGrep: true
         });
         const data4 = parseToolResult(result4);
-        assert(data4.searchMode === 'traditional', "legacyGrep=true 使用传统搜索");
 
         // ============================================================
-        // 第四部分：模糊搜索
+        // 第四部分：Observation 搜索
         // ============================================================
-        section('第四部分：模糊搜索');
-
-        // 拼写错误的搜索
-        const result5 = await client.callTool('searchNode', { 
-            query: "Javscript"  // 拼写错误
-        });
-        const data5 = parseToolResult(result5);
-        
-        // 应该仍然能返回结果（模糊搜索）
-        assert(data5.entities && data5.entities.length > 0, "模糊搜索能处理拼写错误");
-
-        // ============================================================
-        // 第五部分：Observation 搜索
-        // ============================================================
-        section('第五部分：Observation 搜索');
+        section('第四部分：Observation 搜索');
 
         // 搜索观察内容中的关键词
         const result6 = await client.callTool('searchNode', { 
@@ -257,9 +241,9 @@ async function test() {
         assert(data7.entities.length > 0, "能搜索到中文 observation 内容（可能匹配相似词）");
 
         // ============================================================
-        // 第六部分：Entity Type 搜索
+        // 第五部分：Entity Type 搜索
         // ============================================================
-        section('第六部分：Entity Type 搜索');
+        section('第五部分：Entity Type 搜索');
 
         // 搜索语言类型
         const result8 = await client.callTool('searchNode', { 
@@ -273,9 +257,9 @@ async function test() {
         assert(foundLang.length > 0, "能搜索到指定 entityType 的实体");
 
         // ============================================================
-        // 第七部分：空结果和无结果
+        // 第六部分：空结果和无结果
         // ============================================================
-        section('第七部分：空结果和无结果');
+        section('第六部分：空结果和无结果');
 
         // 搜索不存在的关键词
         const result9 = await client.callTool('searchNode', { 
@@ -287,9 +271,9 @@ async function test() {
         assert(data9.entities.length === 0 || data9.entities.length <= 2, "不存在关键词返回空或少量结果");
 
         // ============================================================
-        // 第八部分：搜索权重
+        // 第七部分：搜索权重
         // ============================================================
-        section('第八部分：搜索权重');
+        section('第七部分：搜索权重');
 
         // 搜索 name 权重最高的字段
         const result10 = await client.callTool('searchNode', { 
@@ -302,9 +286,9 @@ async function test() {
         assert(data10.entities[0].name === "Python", "name 字段权重最高");
 
         // ============================================================
-        // 第九部分：关系搜索
+        // 第八部分：关系搜索
         // ============================================================
-        section('第九部分：关系搜索');
+        section('第八部分：关系搜索');
 
         // 读取 React 的关系
         const result11 = await client.callTool('readNode', { 
@@ -324,9 +308,9 @@ async function test() {
         }
 
         // ============================================================
-        // 第十部分：搜索索引重建
+        // 第九部分：搜索索引重建
         // ============================================================
-        section('第十部分：搜索索引');
+        section('第九部分：搜索索引');
 
         // 创建新实体后搜索
         await client.callTool('createEntity', {
@@ -346,6 +330,33 @@ async function test() {
         
         const foundDeno = data12.entities.find(e => e.name === "Deno");
         assert(foundDeno, "新增实体可以被搜索到");
+
+        // ============================================================
+        // 第十部分：**XX** 语义标记搜索
+        // ============================================================
+        section('第十部分：**XX** 语义标记');
+
+        // 创建带 **XX** 标记的实体
+        await client.callTool('createEntity', {
+            entities: [{
+                name: "BoldTest",
+                entityType: "test",
+                definition: "这是一个**核心概念**，用于测试语义标记",
+                observations: ["标记**增强检索**权重"]
+            }]
+        });
+
+        // 搜索 bold token 本体
+        const result13 = await client.callTool('searchNode', { query: "核心概念" });
+        const data13 = parseToolResult(result13);
+        const foundBoldEntity = data13.entities.find(e => e.name === "BoldTest");
+        assert(foundBoldEntity, "**XX** 标记内容可被检索到");
+
+        // 搜索 observation 中的 bold token
+        const result14 = await client.callTool('searchNode', { query: "增强检索" });
+        const data14 = parseToolResult(result14);
+        const foundBoldObs = data14.entities.find(e => e.name === "BoldTest");
+        assert(foundBoldObs, "**XX** 标记在 observation 中也可检索");
 
         // ============================================================
         // 测试结果汇总

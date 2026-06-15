@@ -89,6 +89,21 @@ function tokenizeEntityTypePath(typeStr) {
 }
 
 /**
+ * Extract **XX** bold markers from text
+ * Returns array of XX content (without ** delimiters)
+ */
+function extractBoldTokens(text) {
+    if (!text || typeof text !== 'string') return [];
+    const tokens = [];
+    const regex = /\*\*([^*]+)\*\*/g;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+        tokens.push(match[1].trim());
+    }
+    return tokens.filter(Boolean);
+}
+
+/**
  * BM25 standard parameters
  * k1: term frequency saturation parameter (typical value: 1.2-2.0)
  * b: document length normalization parameter (typical value: 0.75)
@@ -119,6 +134,9 @@ export class NaturalTfIdfSearcher {
         this.docLengths = new Map(); // docId -> token count
         this.avgDocLength = 0;       // Average document length
         
+        // Bold token boost map: docId -> Set of bold tokens
+        this.boldDocTokens = new Map();
+
         // Index built flag
         this.indexBuilt = false;
 
@@ -141,6 +159,7 @@ export class NaturalTfIdfSearcher {
         this.invertedIndex.clear();
         this.docFrequency.clear();
         this.docLengths.clear();
+        this.boldDocTokens.clear();
 
         // Build observation content lookup
         const obsContentMap = new Map();
@@ -209,8 +228,17 @@ export class NaturalTfIdfSearcher {
 
         const index = this.indexToDocId.length;
 
-        // Generate n-gram tokens + extra tokens (e.g. entityType path nodes)
-        const tokens = new Set([...tokenizeForIndex(content), ...extraTokens]);
+        // Extract **XX** bold markers before n-gram tokenization
+        const boldTokens = extractBoldTokens(content);
+        const cleanContent = content.replace(/\*\*[^*]+\*\*/g, '');
+
+        // Generate n-gram tokens + extra tokens (e.g. entityType path nodes) + bold atomic tokens
+        const tokens = new Set([...tokenizeForIndex(cleanContent), ...extraTokens, ...boldTokens]);
+
+        // Store bold tokens for scoring boost
+        if (boldTokens.length > 0) {
+            this.boldDocTokens.set(docId, new Set(boldTokens));
+        }
 
         this.documents.set(docId, {
             entityName,
@@ -270,7 +298,10 @@ export class NaturalTfIdfSearcher {
         const numerator = f * (BM25_K1 + 1);
         const denominator = f + BM25_K1 * (1 - BM25_B + (BM25_B * docLength / this.avgDocLength));
 
-        return idf * (numerator / denominator);
+        // 1.5x boost for **XX** bold tokens
+        const boost = this.boldDocTokens.get(docId)?.has(token) ? 1.5 : 1.0;
+
+        return idf * (numerator / denominator) * boost;
     }
 
     /**
