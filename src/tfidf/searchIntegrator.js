@@ -596,6 +596,19 @@ export class SearchIntegrator {
             result.stats.pairsFound += pairs.length;
         }
 
+        // Normalize similarity scores to 0-1 (same approach as searchNode)
+        const allScores = [
+            ...result.observationPairs.map(p => p.similarityScore),
+            ...result.entityPairs.map(p => p.similarityScore)
+        ].filter(s => s > 0);
+        const maxScore = allScores.length > 0 ? Math.max(...allScores) : 1;
+        for (const p of result.observationPairs) {
+            p.normalizedScore = parseFloat((p.similarityScore / maxScore).toFixed(4));
+        }
+        for (const p of result.entityPairs) {
+            p.normalizedScore = parseFloat((p.similarityScore / maxScore).toFixed(4));
+        }
+
         // Sort and trim final results
         result.observationPairs.sort((a, b) => b.similarityScore - a.similarityScore);
         result.observationPairs = result.observationPairs.slice(0, maxPairs);

@@ -216,6 +216,11 @@ async function test() {
         assert(allData.relationDuplicates.length >= 1, 'relation 查重结果存在');
         assert('stats' in allData, 'stats 字段存在');
         assert(typeof allData.stats.duration === 'number', 'duration 为数字');
+        assert(allData.entityPairs.some(p => 'normalizedScore' in p), 'entityPairs 含 normalizedScore');
+        assert(allData.observationPairs.some(p => 'normalizedScore' in p), 'observationPairs 含 normalizedScore');
+        for (const p of allData.entityPairs) {
+            assert(p.normalizedScore >= 0 && p.normalizedScore <= 1, 'normalizedScore 在 [0,1] 范围');
+        }
 
         // ============================================================
         // 测试 5: 参数边界
