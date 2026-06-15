@@ -1585,9 +1585,20 @@ export class KnowledgeGraphManager {
 let knowledgeGraphManager;
 let searchIntegrator;
 // Zod schemas for entities and relations
+// Normalize entityType to multi-dimensional path format
+function formatEntityType(type) {
+    if (!type || (!type.includes('/') && !type.includes('|'))) return type;
+    const paths = type.split('|').map(p => p.trim()).filter(Boolean).map(p => {
+        let normalized = p.startsWith('/') ? p : '/' + p;
+        normalized = normalized.endsWith('/') ? normalized : normalized + '/';
+        return normalized;
+    });
+    return [...new Set(paths)].join('|');
+}
+
 const EntitySchema = z.object({
     name: z.string().describe("The name of the entity"),
-    entityType: z.string().describe("The type of the entity"),
+    entityType: z.string().describe("The type of the entity").transform(formatEntityType),
     definition: z.string().describe("The definition of the entity"),
     definitionSource: z.string().optional().describe("Source of the definition - prefer URL, filename, or book title"),
     observations: z.array(z.string()).optional().default([]).describe("Observation contents")
@@ -1950,7 +1961,7 @@ server.registerTool("updateNode", {
             name: z.string().optional().describe("New name for the entity"),
             definition: z.string().optional().describe("New definition for the entity"),
             definitionSource: z.string().optional().describe("Source for the definition"),
-            entityType: z.string().optional().describe("New entity type"),
+            entityType: z.string().optional().describe("New entity type").transform(v => v === undefined ? undefined : formatEntityType(v)),
             observationUpdates: z.array(z.object({
                 oldContent: z.string().describe("The observation content to replace"),
                 newContent: z.string().describe("The new observation content")
@@ -2039,13 +2050,48 @@ server.registerTool("updateObservation", {
         jsonContent: { results: formattedResults }
     };
 });
+// Build entityType directory tree
+function buildEntityTree(entities) {
+    const tree = {};
+    for (const entity of entities) {
+        const types = entity.entityType
+            ? entity.entityType.split('|').map(t => t.trim()).filter(Boolean)
+            : ['/未分类/'];
+        for (const type of types) {
+            const segments = type.split('/').filter(Boolean);
+            if (segments.length === 0) continue;
+            let current = tree;
+            for (const seg of segments) {
+                if (!current[seg]) current[seg] = { _count: 0 };
+                current[seg]._count++;
+                current = current[seg];
+            }
+            current[entity.name] = {
+                name: entity.name,
+                entityType: entity.entityType,
+                definition: entity.definition
+            };
+        }
+    }
+    return tree;
+}
+
 // Register read_nodes tool
 server.registerTool("listNode", {
     title: "List Node",
     description: "List all entity names, types, and definitions. Use readNode for detailed observations and relations.",
-    inputSchema: {},
-}, async () => {
+    inputSchema: {
+        tree: z.boolean().optional().default(false).describe("Return entityType directory tree instead of flat node list")
+    },
+}, async ({ tree }) => {
     const nodes = await knowledgeGraphManager.listNode();
+    if (tree) {
+        const entityTree = buildEntityTree(nodes);
+        return {
+            content: [{ type: "text", text: JSON.stringify(entityTree, null, 2) }],
+            jsonContent: { tree: entityTree }
+        };
+    }
     return {
         content: [{ type: "text", text: JSON.stringify(nodes) }],
         jsonContent: { nodes }

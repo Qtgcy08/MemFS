@@ -75,6 +75,19 @@ function tokenizeForIndex(text) {
     return Array.from(tokens);
 }
 
+// Extract atomic tokens from entityType multi-dimensional paths.
+// e.g. '/社会学/人物/|/经济学/人物/' → ['社会学', '人物', '经济学', '/社会学/人物/', '/经济学/人物/']
+function tokenizeEntityTypePath(typeStr) {
+    if (!typeStr || (!typeStr.includes('/') && !typeStr.includes('|'))) return [];
+    const tokens = new Set();
+    const paths = typeStr.split('|').map(p => p.trim()).filter(Boolean);
+    for (const p of paths) {
+        tokens.add(p);
+        p.split('/').filter(Boolean).forEach(n => tokens.add(n));
+    }
+    return Array.from(tokens);
+}
+
 /**
  * BM25 standard parameters
  * k1: term frequency saturation parameter (typical value: 1.2-2.0)
@@ -140,10 +153,11 @@ export class NaturalTfIdfSearcher {
             this._addDocument(entity.name, entity.name, 'name', entity);
         });
 
-        // Index entity types
+        // Index entity types (with multi-dimensional path tokenization)
         entities.forEach(entity => {
             if (entity.entityType) {
-                this._addDocument(entity.entityType, entity.name, 'entityType', entity);
+                const pathTokens = tokenizeEntityTypePath(entity.entityType);
+                this._addDocument(entity.entityType, entity.name, 'entityType', entity, null, pathTokens);
             }
         });
 
@@ -188,15 +202,15 @@ export class NaturalTfIdfSearcher {
     /**
       * Add a document to the index
       */
-    _addDocument(content, entityName, field, original, observationId = null) {
+    _addDocument(content, entityName, field, original, observationId = null, extraTokens = []) {
         const docId = field === 'observation'
             ? `obs:${observationId}`
             : `entity:${entityName}:${field}`;
 
         const index = this.indexToDocId.length;
 
-        // Generate n-gram tokens
-        const tokens = new Set(tokenizeForIndex(content));
+        // Generate n-gram tokens + extra tokens (e.g. entityType path nodes)
+        const tokens = new Set([...tokenizeForIndex(content), ...extraTokens]);
 
         this.documents.set(docId, {
             entityName,
