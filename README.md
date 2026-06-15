@@ -43,11 +43,11 @@ npm install
 # 3. Run server
 node index.js
 
-# Or specify custom storage directory
-MEMORY_DIR=~/my-knowledge
+# Or with CLI args (recommended)
+node index.js --memory-dir ~/my-knowledge --git-autocommit --duplicates --autogc
 
-# Enable Git auto-sync (auto-commits on every save)
-GITAUTOCOMMIT=true node index.js
+# Or via environment variables (legacy)
+MEMORY_DIR=~/my-knowledge GITAUTOCOMMIT=true node index.js
 ```
 
 ### Configure as MCP Server
@@ -80,37 +80,53 @@ GITAUTOCOMMIT=true node index.js
 
 ---
 
-## 📰 What's New in 2.4.12
+## 📰 What's New in v3.7.12
 
-### Git Auto-Commit
+### CLI Args > Env Vars
 
-New `GITAUTOCOMMIT=true` environment variable — every operation auto-commits to Git:
+All configuration now supports CLI arguments with `args > env > default` priority:
 
+```bash
+node index.js --memory-dir ~/my-knowledge --git-autocommit --duplicates --autogc
 ```
-auto-commit:[createEntity "Weber"] at [utc:2026-03-28T12:34:56.789Z] [tz:Asia/Shanghai]
-```
 
-### searchNode Refactoring
+| Arg | Env fallback | Description |
+|-----|-------------|-------------|
+| `--memory-dir <path>` | `MEMORY_DIR` | Data directory |
+| `--git-autocommit` | `GITAUTOCOMMIT=true` | Enable git auto-commit |
+| `--mode sse` | — | SSE HTTP mode |
+| `--port <n>` | — | SSE port |
+| `--token <str>` | — | SSE auth token |
+| `--duplicates` | — | Enable analyzeDuplicates dedup tool |
+| `--autogc <N>` | — | Auto `git gc --auto` every N commits |
 
-- Response simplified to `{ entities, observations, relations }`
-- Removed `searchMode` field
-- `observations` now includes `updatedAt`
-- Related entities count limited by `limit`
-- Unified tokenization: 2~(n-1) gram, no language detection
-- 2-gram penalty **×0.5**: short tokens no longer over-match
-- Field weights centralized in `DEFAULT_FIELD_WEIGHTS`
-- `definitionSource` added to search index
-- Relation type matching boost
+### SSE Mode
 
-### Operation Return Refactoring
+HTTP SSE transport with token auth — `--mode sse --port 3100 --token mytoken`.
 
-- Write operation messages simplified (less LLM token consumption)
-- Delete operations return full data for potential undo
-- `unlinkObservation` now uses ID-based input (renamed from deleteObservation)
+### entityType Multi-Dimensional Paths
 
-### Auxiliary Tools
+Filesystem-style taxonomy: `/社会学/人物/|/经济学/人物/` — Zod auto-formats, BM25 indexes path nodes, `listNode` returns directory tree.
 
-- New `getConsole` tool to retrieve buffered logs
+### **XX** Semantic Mark Tag
+
+Markdown bold as semantic tag — BM25 weight ×1.5, transparent to search, zero schema change.
+
+### analyzeDuplicates Dedup Tool
+
+BM25 mean-similarity dedup for observations/entities/relations (opt-in via `--duplicates` flag). Worker thread parallel compute, distribution histogram for threshold tuning.
+
+### --autogc Auto-GC Counter
+
+Fire-and-forget `git gc --auto` every N auto-commits (default 20). Keeps the git repo lean.
+
+### 18 MCP Tools
+
+New: `analyzeDuplicates`, `--autogc` git gc. `listNode` defaults to directory tree view.
+
+### Time Parameter Cleanup
+
+`time=false` omits `createdAt`/`updatedAt` entirely; `time=true` omits `updatedAt` when null.
 
 ---
 
@@ -170,7 +186,7 @@ flowchart TD
 
 ---
 
-## 📦 Complete API Tools (16 total)
+## 📦 Complete API Tools (18 total)
 
 ### Create
 
@@ -213,6 +229,7 @@ flowchart TD
 | Tool | Function | Example |
 |------|----------|---------|
 | `getConsole` | Get console messages and Git commit logs | View auto-commit history |
+| `analyzeDuplicates` | BM25 dedup analysis (needs `--duplicates` flag) | Find near-duplicate observations |
 
 ---
 
@@ -332,31 +349,35 @@ await updateNode({
 | Default | `~/.memory/memory.jsonl` |
 | Custom directory | `MEMORY_DIR=/path/to/data` |
 
-### Environment Variables
+### CLI Arguments
 
-| Variable | Description | Default | Status |
-|----------|-------------|---------|--------|
-| `MEMORY_DIR` | Data storage directory | `~/.memory` | ✅ Recommended |
-| `GITAUTOCOMMIT` | Enable Git auto-commit on every save | `false` | ✅ Recommended |
+| Arg | Env fallback | Description | Default |
+|-----|-------------|-------------|---------|
+| `--memory-dir <path>` | `MEMORY_DIR` | Data storage directory | `~/.memory` |
+| `--git-autocommit` | `GITAUTOCOMMIT=true` | Enable Git auto-commit | `false` |
+| `--duplicates` | — | Enable analyzeDuplicates dedup tool | off |
+| `--autogc <N>` | — | Auto `git gc --auto` every N commits | `20` |
+| `--mode sse` | — | SSE HTTP mode | stdio |
+| `--port <n>` | — | SSE port | `3100` |
+| `--token <str>` | — | SSE auth token | none |
 
 ---
 
 ## 🔄 Git Auto-Sync
 
-When enabled, every save to the memory file is automatically committed to Git for version control.
+When enabled (`--git-autocommit` or `GITAUTOCOMMIT=true`), every save to the memory file is automatically committed to Git for version control.
 
 ```bash
-# Enable Git auto-commit
-GITAUTOCOMMIT=true node index.js
+# Via CLI arg (recommended)
+node index.js --memory-dir /path/to/data --git-autocommit
 
-# Or in MCP config
-{
-  "environment": {
-    "MEMORY_DIR": "/path/to/data",
-    "GITAUTOCOMMIT": "true"
-  }
-}
+# Via environment variable
+GITAUTOCOMMIT=true node index.js
 ```
+
+### Auto-GC
+
+With `--autogc <N>`, `git gc --auto` runs automatically every N auto-commits (default 20). Fire-and-forget, non-blocking.
 
 ### Commit Format
 
@@ -369,15 +390,6 @@ Example:
 auto-commit:[createEntity "Weber"] at [utc:2026-03-22T09:15:30.123Z] [tz:Asia/Shanghai]
 auto-commit:[updateNode "Durkheim"] at [utc:2026-03-22T09:16:45.456Z] [tz:Asia/Shanghai]
 auto-commit:[deleteRelation "Weber"→"Durkheim"] at [utc:2026-03-22T09:17:00.789Z] [tz:Asia/Shanghai]
-```
-auto-sync: (operation_type "details") at UTC YYYY-MM-DDTHH:mm:ss.SSSZ
-```
-
-Example:
-```
-auto-sync: (createEntity "Weber") at UTC 2026-03-22T09:15:30.123Z
-auto-sync: (updateNode "Durkheim") at UTC 2026-03-22T09:16:45.456Z
-auto-sync: (deleteRelation "Weber"→"Durkheim") at UTC 2026-03-22T09:17:00.789Z
 ```
 
 ### View Commit History
@@ -407,11 +419,20 @@ git checkout legacy
 ## 🧪 Testing
 
 ```bash
-# Full test suite (22 tests)
-node test_mcp_full.mjs
+# Full test suite (29 tests, SSE skipped by default)
+MEMORY_DIR=test_cache node test_mcp_full.mjs
+
+# analyzeDuplicates dedup (standalone)
+node test_mcp_dedup.mjs
+
+# Hybrid search
+MEMORY_DIR=test_cache node test_mcp_hybrid_search.mjs
 
 # Git Sync tests
 node test_gitsync.mjs
+
+# SSE tests (opt-in)
+TEST_SSE=true MEMORY_DIR=test_cache node test_mcp_full.mjs
 ```
 
 ---
@@ -445,7 +466,7 @@ So:
 
 - **Borrow filesystem wisdom**: inode table, hard links, copy-on-write
 - **Search uses BM25 + Fuzzy**: lightweight, explainable, transparent, controllable
-- **Expose as tools**: 16 MCP tools, LLM calls on demand
+- **Expose as tools**: 18 MCP tools, LLM calls on demand
 
 **Result?** — A quiet, efficient, unobtrusive knowledge management tool.
 
