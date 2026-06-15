@@ -5,6 +5,10 @@
 
 import { HybridSearchService } from './hybridSearchService.js';
 import { TraditionalSearcher } from './traditionalSearch.js';
+import { Worker } from 'worker_threads';
+import { fileURLToPath } from 'url';
+import path from 'path';
+import os from 'os';
 
 function formatIndexSize(sizeBytes) {
     if (sizeBytes >= 1024 * 1024) {
@@ -431,140 +435,172 @@ export class SearchIntegrator {
             stats: { duration: 0, candidatesChecked: 0, pairsFound: 0 }
         };
 
-        // 1. Observation duplicates
-        if (scope === 'all' || scope === 'observation') {
+        const obsScope = scope === 'all' || scope === 'observation';
+        const entityScope = scope === 'all' || scope === 'entity';
+
+        if (obsScope) {
             const obsDocIds = [];
             bm25.documents.forEach((doc, docId) => {
                 if (docId.startsWith('obs:')) obsDocIds.push(docId);
             });
+            result._obsDocIds = obsDocIds;
+            result._obsMap = Array.from(graph.observations.map(o => [String(o.id), o.content]));
+        }
+        if (entityScope) {
+            const entityNames = [];
+            bm25.documents.forEach((doc, docId) => {
+                if (docId.startsWith('entity:') && !entityNames.includes(doc.entityName)) {
+                    entityNames.push(doc.entityName);
+                }
+            });
+            result._entityNames = entityNames;
+        }
 
+        const workerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dedupWorker.js');
+        const allWorkers = [];
+
+        // --- Concurrent dispatch: observation + entity workers ---
+        if (obsScope && result._obsDocIds.length >= 50) {
+            const numWorkers = Math.min(os.cpus().length || 4, 8);
+                const chunkSize = Math.ceil(result._obsDocIds.length / numWorkers);
+            const chunks = [];
+            for (let i = 0; i < result._obsDocIds.length; i += chunkSize) {
+                chunks.push(result._obsDocIds.slice(i, i + chunkSize));
+            }
+            for (const chunk of chunks) {
+                allWorkers.push(new Promise((resolve, reject) => {
+                    const w = new Worker(workerPath, {
+                        workerData: {
+                            mode: 'obs',
+                            memoryFilePath: this.manager.memoryFilePath,
+                            chunk, threshold, maxPairs,
+                            obsMap: result._obsMap
+                        }
+                    });
+                    w.on('message', resolve);
+                    w.on('error', reject);
+                    w.on('exit', c => { if (c !== 0) reject(new Error(`Worker exit ${c}`)); });
+                }));
+            }
+        }
+
+        if (entityScope && result._entityNames.length >= 20) {
+            const numWorkers = Math.min(os.cpus().length || 4, 8);
+            const names = result._entityNames;
+            const chunkSize = Math.ceil(names.length / numWorkers);
+            for (let i = 0; i < names.length; i += chunkSize) {
+                const start = i;
+                const end = Math.min(i + chunkSize, names.length);
+                allWorkers.push(new Promise((resolve, reject) => {
+                    const w = new Worker(workerPath, {
+                        workerData: {
+                            mode: 'entity',
+                            memoryFilePath: this.manager.memoryFilePath,
+                            entityNames: names, start, end,
+                            threshold, maxPairs
+                        }
+                    });
+                    w.on('message', resolve);
+                    w.on('error', reject);
+                    w.on('exit', c => { if (c !== 0) reject(new Error(`Worker exit ${c}`)); });
+                }));
+            }
+        }
+
+        // --- Run all workers concurrently ---
+        const workerResults = await Promise.all(allWorkers);
+
+        // --- Process results ---
+        for (const wr of workerResults) {
+            if (wr.error) { console.error('[Dedup] Worker error:', wr.error); continue; }
+            if (wr.checked !== undefined) {
+                result.stats.candidatesChecked += wr.checked;
+            }
+            if (wr.pairs) {
+                result.stats.pairsFound += wr.pairs.length;
+                // Infer type: obs pairs have observationA/B, entity pairs have entityA/B
+                if (wr.pairs.length > 0 && 'observationA' in wr.pairs[0]) {
+                    result.observationPairs.push(...wr.pairs);
+                } else {
+                    result.entityPairs.push(...wr.pairs);
+                }
+            }
+        }
+
+        // --- Small datasets: inline fallback (runs after workers but small, negligible) ---
+        if (obsScope && result._obsDocIds.length < 50) {
             const seen = new Set();
             const pairs = [];
-
-            for (const docIdA of obsDocIds) {
+            const obsMap = new Map(result._obsMap);
+            for (const docIdA of result._obsDocIds) {
                 const docA = bm25.documents.get(docIdA);
                 if (!docA) continue;
-
-                // Count shared tokens per candidate
-                // Skip high-frequency tokens (df > 200) to avoid O(n²) explosion on common 2-grams
-                const sharedCount = new Map();
+                const sc = new Map();
                 for (const token of docA.tokens) {
                     const df = bm25.docFrequency.get(token) || 0;
                     if (df > 200) continue;
-                    const docMap = bm25.invertedIndex.get(token);
-                    if (docMap) {
-                        docMap.forEach((_, docId) => {
-                            if (docId !== docIdA && docId.startsWith('obs:')) {
-                                sharedCount.set(docId, (sharedCount.get(docId) || 0) + 1);
-                            }
-                        });
-                    }
+                    const dm = bm25.invertedIndex.get(token);
+                    if (dm) dm.forEach((_, did) => {
+                        if (did !== docIdA && did.startsWith('obs:')) sc.set(did, (sc.get(did) || 0) + 1);
+                    });
                 }
-
-                // Sort by shared token count, take top candidates, only process pairs sharing ≥2 tokens
-                const candidates = Array.from(sharedCount.entries())
-                    .filter(([, count]) => count >= 2)
-                    .sort((a, b) => b[1] - a[1])
-                    .slice(0, 100);
-
-                for (const [docIdB] of candidates) {
-                    const pairKey = docIdA < docIdB ? `${docIdA}|${docIdB}` : `${docIdB}|${docIdA}`;
-                    if (seen.has(pairKey)) continue;
-                    seen.add(pairKey);
-
+                const cands = Array.from(sc.entries()).filter(([, c]) => c >= 2)
+                    .sort((a, b) => b[1] - a[1]).slice(0, 100);
+                for (const [docIdB] of cands) {
+                    const pk = docIdA < docIdB ? `${docIdA}|${docIdB}` : `${docIdB}|${docIdA}`;
+                    if (seen.has(pk)) continue;
+                    seen.add(pk);
                     const score = bm25.computeDocSimilarity(docIdA, docIdB);
-                    if (score >= threshold) {
-                        pairs.push({ docIdA, docIdB, score });
-                    }
+                    if (score >= threshold) pairs.push({ docIdA, docIdB, score });
                 }
             }
-
             pairs.sort((a, b) => b.score - a.score);
-            const topPairs = pairs.slice(0, maxPairs);
-
-            // Resolve observation content
-            const obsMap = new Map();
-            graph.observations.forEach(o => obsMap.set(o.id, o.content));
-
-            result.observationPairs = topPairs.map(p => ({
-                observationA: { id: parseInt(p.docIdA.replace('obs:', '')), content: obsMap.get(parseInt(p.docIdA.replace('obs:', ''))) },
-                observationB: { id: parseInt(p.docIdB.replace('obs:', '')), content: obsMap.get(parseInt(p.docIdB.replace('obs:', ''))) },
+            result.observationPairs = pairs.slice(0, maxPairs).map(p => ({
+                observationA: { id: parseInt(p.docIdA.replace('obs:', ''), 10), content: obsMap.get(p.docIdA) || '' },
+                observationB: { id: parseInt(p.docIdB.replace('obs:', ''), 10), content: obsMap.get(p.docIdB) || '' },
                 similarityScore: parseFloat(p.score.toFixed(4))
             }));
-
             result.stats.candidatesChecked += seen.size;
             result.stats.pairsFound += pairs.length;
         }
 
-        // 2. Entity duplicates (compare entity field documents)
-        if (scope === 'all' || scope === 'entity') {
-            const entityDocsByName = new Map();
-            bm25.documents.forEach((doc, docId) => {
-                if (docId.startsWith('entity:')) {
-                    if (!entityDocsByName.has(doc.entityName)) {
-                        entityDocsByName.set(doc.entityName, []);
-                    }
-                    entityDocsByName.get(doc.entityName).push({ docId, doc });
-                }
-            });
-
-            const entityNames = Array.from(entityDocsByName.keys());
+        if (entityScope && result._entityNames.length < 20) {
+            const names = result._entityNames;
             const seen = new Set();
             const pairs = [];
-
-            for (let i = 0; i < entityNames.length; i++) {
-                for (let j = i + 1; j < entityNames.length; j++) {
-                    const nameA = entityNames[i];
-                    const nameB = entityNames[j];
-
-                    // Compute max similarity across all field combinations
-                    let maxScore = 0;
-                    let bestPair = { docIdA: null, docIdB: null };
-
-                    for (const entryA of entityDocsByName.get(nameA)) {
-                        for (const entryB of entityDocsByName.get(nameB)) {
-                            const pairKey = entryA.docId < entryB.docId
-                                ? `${entryA.docId}|${entryB.docId}`
-                                : `${entryB.docId}|${entryA.docId}`;
-                            if (seen.has(pairKey)) continue;
-                            seen.add(pairKey);
-
-                            const score = bm25.computeDocSimilarity(entryA.docId, entryB.docId);
-                            if (score > maxScore) {
-                                maxScore = score;
-                                bestPair = { docIdA: entryA.docId, docIdB: entryB.docId };
-                            }
+            for (let i = 0; i < names.length; i++) {
+                for (let j = i + 1; j < names.length; j++) {
+                    const nameA = names[i], nameB = names[j];
+                    let bestScore = 0, bestPair = { docIdA: null, docIdB: null };
+                    for (const [dA] of bm25.documents) {
+                        if (!dA.startsWith('entity:') || !dA.includes(nameA)) continue;
+                        for (const [dB] of bm25.documents) {
+                            if (!dB.startsWith('entity:') || !dB.includes(nameB)) continue;
+                            const pk = dA < dB ? `${dA}|${dB}` : `${dB}|${dA}`;
+                            if (seen.has(pk)) continue;
+                            seen.add(pk);
+                            const score = bm25.computeDocSimilarity(dA, dB);
+                            if (score > bestScore) { bestScore = score; bestPair = { docIdA: dA, docIdB: dB }; }
                         }
                     }
-
-                    if (maxScore >= threshold) {
-                        pairs.push({
-                            entityNameA: nameA,
-                            entityNameB: nameB,
-                            score: maxScore,
-                            docIdA: bestPair.docIdA,
-                            docIdB: bestPair.docIdB
-                        });
-                    }
+                    if (bestScore >= threshold) pairs.push({ entityNameA: nameA, entityNameB: nameB, score: bestScore, ...bestPair });
                 }
             }
-
             pairs.sort((a, b) => b.score - a.score);
-            const topPairs = pairs.slice(0, maxPairs);
-
-            result.entityPairs = topPairs.map(p => {
-                const docA = bm25.documents.get(p.docIdA);
-                const docB = bm25.documents.get(p.docIdB);
-                return {
-                    entityA: { name: p.entityNameA, matchedField: docA?.field || 'name', matchedContent: docA?.content || '' },
-                    entityB: { name: p.entityNameB, matchedField: docB?.field || 'name', matchedContent: docB?.content || '' },
-                    similarityScore: parseFloat(p.score.toFixed(4))
-                };
-            });
-
+            result.entityPairs = pairs.slice(0, maxPairs).map(p => ({
+                entityA: { name: p.entityNameA, matchedField: 'name', matchedContent: '' },
+                entityB: { name: p.entityNameB, matchedField: 'name', matchedContent: '' },
+                similarityScore: parseFloat(p.score.toFixed(4))
+            }));
             result.stats.candidatesChecked += seen.size;
             result.stats.pairsFound += pairs.length;
         }
+
+        // Sort and trim final results
+        result.observationPairs.sort((a, b) => b.similarityScore - a.similarityScore);
+        result.observationPairs = result.observationPairs.slice(0, maxPairs);
+        result.entityPairs.sort((a, b) => b.similarityScore - a.similarityScore);
+        result.entityPairs = result.entityPairs.slice(0, maxPairs);
 
         // 3. Relation duplicates (exact (from, to) pair with multiple relationTypes)
         if (scope === 'all' || scope === 'relation') {
@@ -596,6 +632,9 @@ export class SearchIntegrator {
             });
         }
 
+        delete result._obsDocIds;
+        delete result._obsMap;
+        delete result._entityNames;
         result.stats.duration = Date.now() - startTime;
         return result;
     }
