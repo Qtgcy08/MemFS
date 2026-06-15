@@ -1,17 +1,18 @@
 # AGENTS.md
 
-**MemFS** — Knowledge graph management system. One Node.js process, speaks stdio/SSE MCP.
+**MemFS** — One Node.js process, stdio/SSE MCP. Knowledge graph with filesystem-inspired data model.
 
 **Stack:** Node.js 22+ ES Modules | MCP SDK 1.29.0 | Zod | Fuse.js 7.1.0 | Pure JS BM25
 
 ## Entrypoint & Tools
 
-- `index.js` (~2250 lines) contains everything: `KnowledgeGraphManager` class, 17 MCP tool handlers, all utilities. No framework, no codegen.
-- Tools: `createEntity` `createRelation` `addObservation` `deleteEntity` `deleteRelation` `unlinkObservation` `recycleObservation` `getOrphanObservation` `readNode` `readObservation` `listNode` `listGraph` `searchNode` `updateNode` `updateObservation` `howWork` `getConsole`
-- `analyzeDuplicates` (optional, `--duplicates` flag): BM25 mean-similarity dedup tool for observations, entities, and relations. Default threshold 0.8 (normalized).
+- `index.js` (~2300 lines) contains everything: `KnowledgeGraphManager`, `gitSync` object, 18 MCP tool handlers, all utilities. No framework, no codegen.
+- Tools: `getConsole` `createEntity` `createRelation` `addObservation` `deleteEntity` `deleteRelation` `unlinkObservation` `recycleObservation` `getOrphanObservation` `readNode` `readObservation` `listNode` `listGraph` `searchNode` `updateNode` `updateObservation` `howWork`
+- `analyzeDuplicates` (optional, `--duplicates` flag): BM25 mean-similarity dedup tool. Default threshold 0.8 (normalized).
 - `howWork` returns `skills/memfs_best_practices/SKILL.md` (lazy-loaded)
-- `**XX**` in text fields (definition/observation) → BM25 ×1.5 weighted atomic token, no-gram, transparent to search
+- `**XX**` in text fields → BM25 ×1.5 weighted atomic token, transparent to search
 - Field weights: name 5.0, entityType 2.5, definition 2.5, definitionSource 1.5, observation 1.0
+- Tool registration uses `server.registerTool(name, { inputSchema: {...} }, handler)` (older SDK pattern)
 
 ## Search Modules (src/tfidf/)
 
@@ -21,14 +22,8 @@
 | `bm25Search.js` | Pure JS BM25 with n-gram (2/3/4) tokenization |
 | `fuseSearch.js` | Fuse.js 7.1.0 wrapper |
 | `traditionalSearch.js` | Legacy keyword fallback (`legacyGrep` mode) |
-| `searchIntegrator.js` | Routes to hybrid or traditional |
-
-## entityType Multi-Dimensional Paths
-
-`entityType` supports path syntax: `/修饰语/中心语/`, multiple paths via `|`. Older plain strings (`编程语言`) work unchanged.
-
-- `listNode(tree=true)` returns directory tree instead of flat node list
-- BM25 index extracts path nodes as atomic tokens to avoid n-gram boundary noise
+| `searchIntegrator.js` | Routes to hybrid/traditional search, hosts `analyzeDuplicates()` |
+| `dedupWorker.js` | Worker thread module for dedup (parallel compute) |
 
 ## CLI Args (args > env)
 
@@ -39,60 +34,64 @@
 | `--mode sse` | — | SSE HTTP mode |
 | `--port <n>` | — | SSE port (default 3100) |
 | `--token <str>` | — | SSE auth token |
-| `--duplicates` | — | Enable analyzeDuplicates tool (BM25 dedup, optional) |
+| `--duplicates` | — | Enable analyzeDuplicates tool (optional) |
+| `--autogc <N>` | — | Auto `git gc --auto` every N commits (default 20) |
+
+## Model
+
+Three JSONL types: `entity` (with `observationIds`), `observation` (shared inode table, hard-link semantics), `relation` (from→to→relationType).
+- `createdAt`/`updatedAt`: stored as `{utc, timezone}`, API formats to `"YYYY-MM-DD HH:mm:ss IANA"`
+- Observations are copy-on-write; duplicates by content share a single ID
+- `createRelation` filters exact duplicates by (from, to, relationType) triple at API level
+- MEMORY_DIR must be a directory path (not file path); server reads `memory.jsonl` inside it
+
+## gitSync
+
+`gitSync` is a module-level object (not a class), created at `index.js:114`.
+- `gcThreshold: 0`, `gcCounter: 0` — fire-and-forget async `git gc --auto` counter
+- Auto-gc does not block the mutation pipeline; `execFile('git', ['gc', '--auto'])` is not awaited
+
+## Code Conventions
+
+4 spaces, single quotes, semicolons, max 100 chars/line. Classes PascalCase, functions camelCase, MCP tools snake_case. `console.error()` prefixes: `[Git]` `[MCP Server]` `[Stats]`. No `as any` or `@ts-ignore`.
+
+Version: `const { version: VERSION } = require('./package.json')` (line 15). No hardcoded copy.
+
+MCP tool response pattern — always `jsonContent` alongside `content[0].text`:
+```javascript
+return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+         jsonContent: result };
+```
 
 ## Testing
 
 ```bash
-# Prerequisite
-cp test_cache/mcp-client.js .
-
 # Full suite (29 tests, skips SSE by default)
 MEMORY_DIR=test_cache node test_mcp_full.mjs
 
-# SSE tests (opt-in, requires http server)
+# SSE tests (opt-in)
 TEST_SSE=true MEMORY_DIR=test_cache node test_mcp_full.mjs
 
-# Git sync scenarios
-node test_gitsync.mjs
-
-# Hybrid search specific
-node test_mcp_hybrid_search.mjs
-
-# analyzeDuplicates (opt-in, requires --duplicates arg)
+# analyzeDuplicates (standalone, no MEMORY_DIR needed)
 node test_mcp_dedup.mjs
+
+# Hybrid search
+MEMORY_DIR=test_cache node test_mcp_hybrid_search.mjs
+
+# Git sync scenarios (standalone)
+node test_gitsync.mjs
 
 # Fast syntax check
 node --check index.js
 node --check src/tfidf/bm25Search.js
 ```
 
-Key testing quirks:
+Quirks:
 - SSE test spawns a real HTTP subprocess, skipped unless `TEST_SSE=true`
-- `test_cache/` has its own git repo used as test fixture
-- `mcp-client.js` helper must exist in project root
-
-## Data Model (JSONL)
-
-Three types: `entity` (with `observationIds` array), `observation` (shared inode table), `relation` (from→to→relationType).
-- `createdAt`/`updatedAt`: stored as `{utc, timezone}`, API formats to `"YYYY-MM-DD HH:mm:ss IANA"`
-- Observations are centrally stored, multi-entity via hard-link IDs; copy-on-write on updates
-
-## MCP Tool Pattern
-
-```javascript
-return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-         jsonContent: result };
-```
-No `outputSchema`, no `structuredContent` — always `jsonContent`.
-
-## Code Conventions
-
-4 spaces, single quotes, semicolons, max 100 chars/line. Classes PascalCase, functions camelCase, MCP tools snake_case. `console.error()` prefixes: `[Git]` `[MCP Server]` `[Stats]`. No `as any` or `@ts-ignore`.
-
-## VERSION
-
-`const { version: VERSION } = require('./package.json')` (line 15 of `index.js`). No hardcoded copy.
+- `test_cache/` is its own git repo, used as fixture for git tests; also in `.gitignore`
+- `mcp-client.js` in root is the authoritative version; `test_cache/mcp-client.js` is a copy that must be kept in sync
+- Dedup and gitsync tests are standalone (no MEMORY_DIR required) — they pre-write JSONL directly or use in-memory fixtures
+- `test_cache/` is gitignored — changes there won't appear in `git status`
 
 ## Branches
 

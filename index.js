@@ -9,7 +9,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { homedir, hostname, userInfo } from 'os';
-import { execSync, execFileSync } from 'child_process';
+import { execSync, execFileSync, execFile } from 'child_process';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { version: VERSION } = require('./package.json');
@@ -115,6 +115,8 @@ const gitSync = {
     enabled: false,
     initialized: false,
     memoryDir: null,
+    gcThreshold: 0,
+    gcCounter: 0,
     
     // Check if git sync is enabled
     isEnabled() {
@@ -156,6 +158,21 @@ const gitSync = {
         }
     },
     
+    // Run git gc --auto asynchronously (fire-and-forget)
+    runGc() {
+        if (this.gcThreshold <= 0) return;
+        this.gcCounter++;
+        if (this.gcCounter < this.gcThreshold) return;
+        this.gcCounter = 0;
+        execFile('git', ['gc', '--auto'], { cwd: this.memoryDir }, (err) => {
+            if (err) {
+                this.log('warn', `gc --auto failed: ${err.message}`);
+            } else {
+                this.log('info', 'gc --auto completed');
+            }
+        });
+    },
+
     // Check if git is installed
     async isGitInstalled() {
         const result = await this.execGit(['--version']);
@@ -255,6 +272,7 @@ const gitSync = {
             const commitResult = this.execGit(['commit', '-m', commitMsg], dir);
             if (commitResult.success) {
                 this.log('info', `Auto-committed: ${commitMsg}`);
+                this.runGc();
             } else {
                 this.log('warn', 'Failed to commit: ' + commitResult.error);
             }
@@ -1705,10 +1723,13 @@ server.registerTool("getConsole", {
         // best effort
     }
 
-    // Easter egg for 乐正绫's 11th birthday
+    // Easter egg for 洛天依's 11th birthday
     if (easterEgg) {
         lines.push('');
-        lines.push('🎉 乐正司百曲，绫动万年红 —— 阿绫11周年生日快乐！[v2.4.12]');
+        lines.push('🎸 乐正司百曲，绫动万年红 —— 阿绫11周年生日快乐！[v2.4.12]');
+        lines.push('🎤 华风夏韵，洛水天依 —— 洛天依14周年生日快乐！[v3.7.12]');
+        lines.push('');
+        lines.push('💡 v3.7.12 彩蛋解密：3.7.12 = 7/12 = 洛天依诞生日(7月12日)。版本号本身就是致敬 ❤️');
     }
     
     return {
@@ -2170,6 +2191,15 @@ async function main() {
     if (gitAutoCommitIdx !== -1) {
         process.env.GITAUTOCOMMIT = 'true';
     }
+    const autoGcIdx = process.argv.indexOf('--autogc');
+    if (autoGcIdx !== -1) {
+        const nextArg = process.argv[autoGcIdx + 1];
+        if (nextArg && !nextArg.startsWith('-')) {
+            gitSync.gcThreshold = parseInt(nextArg, 10) || 20;
+        } else {
+            gitSync.gcThreshold = 20;
+        }
+    }
 
     // Initialize managers
     const { knowledgeGraphManager: manager, searchIntegrator: si, memoryDir } = await createManagers();
@@ -2245,10 +2275,13 @@ async function main() {
     console.error(`[Stats] ${entityCount} entities | ${observationCount} observations | ${relationCount} relations | last updated ${lastUpdated} | over startup at [utc:${startupUtc}]`);
     console.error(`[Stats] Index size: ${indexSizeStr}`);
     console.error(`[MCP Server] Memory directory: ${memoryDir}`);
+    if (gitSync.gcThreshold > 0) {
+        console.error(`[Git] Auto-GC enabled, threshold: ${gitSync.gcThreshold}`);
+    }
 }
 
 // Exports for testing
-export { server, consoleBuffer };
+export { server, consoleBuffer, gitSync };
 export function __setTestGlobals(km, si) {
     knowledgeGraphManager = km;
     searchIntegrator = si;
