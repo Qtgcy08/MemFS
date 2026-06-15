@@ -42,11 +42,11 @@ npm install
 # 3. 运行服务器
 node index.js
 
-# 或者指定自定义存储目录
-MEMORY_DIR=~/my-knowledge
+# 或使用 CLI 参数（推荐）
+node index.js --memory-dir ~/my-knowledge --git-autocommit --duplicates --autogc
 
-# 启用 Git 自动同步（每次保存自动提交）
-GITAUTOCOMMIT=true node index.js
+# 或使用环境变量（旧方式）
+MEMORY_DIR=~/my-knowledge GITAUTOCOMMIT=true node index.js
 ```
 
 ### 配置为 MCP 服务器
@@ -79,37 +79,53 @@ GITAUTOCOMMIT=true node index.js
 
 ---
 
-## 📰 2.4.12 更新公告
+## 📰 v3.7.12 更新公告
 
-### Git 自动提交
+### CLI 参数 > 环境变量
 
-新增 `GITAUTOCOMMIT=true` 环境变量，启用后每次操作自动提交到 Git：
+所有配置现支持 CLI 参数，优先级 `args > env > default`：
 
+```bash
+node index.js --memory-dir ~/my-knowledge --git-autocommit --duplicates --autogc
 ```
-auto-commit:[createEntity "韦伯"] at [utc:2026-03-28T12:34:56.789Z] [tz:Asia/Shanghai]
-```
 
-### searchNode 重构
+| 参数 | 环境变量 | 说明 |
+|------|---------|------|
+| `--memory-dir <path>` | `MEMORY_DIR` | 数据目录 |
+| `--git-autocommit` | `GITAUTOCOMMIT=true` | 启用 Git 自动提交 |
+| `--mode sse` | — | SSE HTTP 模式 |
+| `--port <n>` | — | SSE 端口 |
+| `--token <str>` | — | SSE 认证 token |
+| `--duplicates` | — | 启用 analyzeDuplicates 查重工具 |
+| `--autogc <N>` | — | 自动 `git gc --auto`（默认 20 次提交） |
 
-- 返回结构简化为 `{ entities, observations, relations }`
-- 移除 `searchMode` 字段
-- `observations` 增加 `updatedAt` 字段
-- 关联实体总数受 `limit` 限制
-- 统一分词系统：移除语言检测，改为 2~(n-1) gram 统一切分
-- 2-gram 惩罚系数 **×0.5**：短词匹配不再过度命中
-- 字段权重统一管理
-- `definitionSource` 加入搜索索引
-- 关系类型匹配 boost
+### SSE 模式
 
-### 操作返回重构
+HTTP SSE 传输层 + token 认证 — `--mode sse --port 3100 --token mytoken`。
 
-- 写操作返回消息精简，减少 LLM token 消耗
-- 删除操作返回完整数据，便于撤销
-- `unlinkObservation` 改为 ID 输入（从 deleteObservation 更名）
+### entityType 多维路径
 
-### 辅助工具
+文件系统风格分类：`/社会学/人物/|/经济学/人物/` — Zod 自动格式化，BM25 索引路径节点，`listNode` 返回目录树。
 
-- 新增 `getConsole` 工具获取缓冲日志
+### **XX** 语义标记
+
+Markdown 加粗作为语义标签 — BM25 权重 ×1.5，检索透明，零 Schema 改动。
+
+### analyzeDuplicates 查重工具
+
+基于 BM25 均值相似度的语义查重（`--duplicates` flag 按需启用）。Worker 线程并行计算，分布直方图辅助阈值调优。
+
+### --autogc 自动 GC
+
+Fire-and-forget `git gc --auto`，每 N 次 auto-commit 触发（默认 20）。保持 Git 仓库瘦身。
+
+### 18 个 MCP 工具
+
+新增：`analyzeDuplicates`、`--autogc`。`listNode` 默认返回目录树视图。
+
+### Time 参数清理
+
+`time=false` 完全省略 `createdAt`/`updatedAt`；`time=true` 时 `updatedAt` 为 null 不输出。
 
 ---
 
@@ -169,7 +185,7 @@ flowchart TD
 
 ---
 
-## 📦 完整 API 工具清单（17个）
+## 📦 完整 API 工具清单（18个）
 
 ### 创建类
 
@@ -188,6 +204,7 @@ flowchart TD
 | `readObservation` | 根据 ID 批量读取观察    | 核查具体观察内容  |
 | `listNode`        | 列出所有实体概览        | 浏览知识库结构   |
 | `listGraph`       | 读取整个知识图谱        | 批量导出、迁移   |
+| `howWork`         | 获取推荐工作流程        | 学习使用 MemFS |
 
 ### 更新类
 
@@ -212,6 +229,7 @@ flowchart TD
 | ----------- | --------------------- | ---------------- |
 | `getConsole` | 获取控制台消息和 Git 提交日志   | 查看自动提交历史     |
 | `howWork`         | 获取推荐工作流指导       | 了解系统使用方法  |
+| `analyzeDuplicates` | BM25 查重分析（需 `--duplicates` 参数） | 发现近似重复的观察 |
 
 ---
 
@@ -349,31 +367,35 @@ await addObservation({
 | 默认    | `~/.memory/memory.jsonl`               |
 | 自定义目录 | `MEMORY_DIR=/path/to/data`             |
 
-### 环境变量
+### CLI 参数
 
-| 变量              | 说明                    | 默认值              | 状态   |
-| --------------- | --------------------- | ---------------- | ---- |
-| `MEMORY_DIR`    | 数据存储目录                | `~/.memory`      | ✅ 推荐 |
-| `GITAUTOCOMMIT` | 启用 Git 自动提交（每次保存自动提交） | `false` | ✅ 推荐 |
+| 参数 | 环境变量 | 说明 | 默认值 |
+|------|---------|------|--------|
+| `--memory-dir <path>` | `MEMORY_DIR` | 数据存储目录 | `~/.memory` |
+| `--git-autocommit` | `GITAUTOCOMMIT=true` | 启用 Git 自动提交 | `false` |
+| `--duplicates` | — | 启用 analyzeDuplicates 查重 | 关闭 |
+| `--autogc <N>` | — | 自动 `git gc --auto` | `20` |
+| `--mode sse` | — | SSE HTTP 模式 | stdio |
+| `--port <n>` | — | SSE 端口 | `3100` |
+| `--token <str>` | — | SSE 认证 token | 无 |
 
 ---
 
 ## 🔄 Git 自动同步
 
-启用后，每次保存记忆文件都会自动提交到 Git，便于追踪变更历史。
+启用后（`--git-autocommit` 或 `GITAUTOCOMMIT=true`），每次保存记忆文件都会自动提交到 Git，便于追踪变更历史。
 
 ```bash
-# 启用 Git 自动提交
-GITAUTOCOMMIT=true node index.js
+# 使用 CLI 参数（推荐）
+node index.js --memory-dir /path/to/data --git-autocommit
 
-# 或者在 MCP 配置中
-{
-  "environment": {
-    "MEMORY_DIR": "/path/to/data",
-    "GITAUTOCOMMIT": "true"
-  }
-}
+# 使用环境变量
+GITAUTOCOMMIT=true node index.js
 ```
+
+### 自动 GC
+
+`--autogc <N>` 参数可在每 N 次 auto-commit 后自动运行 `git gc --auto`（默认 20）。Fire-and-forget，不阻塞操作管线。
 
 ### 提交格式
 
@@ -415,11 +437,20 @@ git checkout legacy
 ## 🧪 测试
 
 ```bash
-# 完整测试套件（25个测试）
-node test_mcp_full.mjs
+# 完整测试套件（29个测试，SSE 默认跳过）
+MEMORY_DIR=test_cache node test_mcp_full.mjs
 
-# Git Sync 测试
+# analyzeDuplicates 查重（独立运行，无需 MEMORY_DIR）
+node test_mcp_dedup.mjs
+
+# 混合搜索
+MEMORY_DIR=test_cache node test_mcp_hybrid_search.mjs
+
+# Git 同步测试
 node test_gitsync.mjs
+
+# SSE 测试（需主动启用）
+TEST_SSE=true MEMORY_DIR=test_cache node test_mcp_full.mjs
 ```
 
 ---
@@ -453,7 +484,7 @@ node test_gitsync.mjs
 
 - **文件系统智慧借鉴过来**：inode 表、硬链接、写时复制
 - **搜索用 BM25 + 模糊**：轻量、可解释、透明可控
-- **工具化暴露**：17 个 MCP 工具，LLM 按需调用
+- **工具化暴露**：18 个 MCP 工具，LLM 按需调用
 
 **结果？** —— 一个安静、高效、不打扰的知识管理工具。
 
