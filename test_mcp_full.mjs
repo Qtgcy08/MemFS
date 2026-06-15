@@ -33,9 +33,12 @@ function section(title) {
 // 解析 MCP 工具返回结果
 function parseToolResult(result) {
     if (!result) return null;
-    // SDK returns { content: [...], structuredContent: {...} }
+    // Handler returns { content: [...], structuredContent/jsonContent: {...} }
     if (result.structuredContent) {
         return result.structuredContent;
+    }
+    if (result.jsonContent) {
+        return result.jsonContent;
     }
     // Fallback: try to parse content as JSON
     if (result.content) {
