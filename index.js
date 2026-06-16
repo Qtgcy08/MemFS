@@ -1679,13 +1679,21 @@ server.registerTool("getConsole", {
     // Force reload on demand (e.g., after external git operations)
     if (reloadnow) {
         console.error('[MCP Server] Reload requested: clearing memory cache');
+        const reloadStart = Date.now();
         knowledgeGraphManager._clearCache();
         const reloaded = await knowledgeGraphManager.loadGraph();
         const rlEntityCount = reloaded.entities.length;
         const rlObsCount = reloaded.observations.length;
         const rlRelCount = reloaded.relations.length;
-        console.error(`[Stats] Reloaded: ${rlEntityCount} entities | ${rlObsCount} observations | ${rlRelCount} relations`);
         await searchIntegrator.ensureIndex('Index rebuilt');
+        const rlElapsed = Date.now() - reloadStart;
+        const rlIndexSize = searchIntegrator.getIndexSize();
+        const rlSizeStr = rlIndexSize >= 1024 * 1024
+            ? `${(rlIndexSize / (1024 * 1024)).toFixed(2)} MB`
+            : rlIndexSize >= 1024
+                ? `${(rlIndexSize / 1024).toFixed(2)} KB`
+                : `${rlIndexSize} B`;
+        console.error(`[Stats] Reloaded: ${rlEntityCount} entities | ${rlObsCount} observations | ${rlRelCount} relations | ${rlSizeStr} | ${rlElapsed}ms`);
     }
     
     // Add buffered messages
