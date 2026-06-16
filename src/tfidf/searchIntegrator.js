@@ -605,9 +605,11 @@ export class SearchIntegrator {
         const maxScore = allRawScores.length > 0 ? Math.max(...allRawScores) : 1;
         for (const p of result.observationPairs) {
             p.normalizedScore = parseFloat((p.similarityScore / maxScore).toFixed(4));
+            delete p.similarityScore;
         }
         for (const p of result.entityPairs) {
             p.normalizedScore = parseFloat((p.similarityScore / maxScore).toFixed(4));
+            delete p.similarityScore;
         }
 
         // Build distribution histogram from all normalized scores (before maxPairs trim)
