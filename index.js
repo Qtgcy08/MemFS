@@ -1681,6 +1681,7 @@ server.registerTool("getConsole", {
         console.error('[MCP Server] Reload requested: clearing memory cache');
         const reloadStart = Date.now();
         knowledgeGraphManager._clearCache();
+        searchIntegrator.isIndexed = false;
         const reloaded = await knowledgeGraphManager.loadGraph();
         const rlEntityCount = reloaded.entities.length;
         const rlObsCount = reloaded.observations.length;
