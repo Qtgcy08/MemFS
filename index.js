@@ -5,7 +5,7 @@ import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import express from 'express';
 import { z } from "zod";
 import Fuse from 'fuse.js';
-import { promises as fs } from 'fs';
+import { promises as fs, existsSync, readFileSync, rmdirSync, unlinkSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { homedir, hostname, userInfo } from 'os';
@@ -525,13 +525,13 @@ export class KnowledgeGraphManager {
     lastOperation;     // Track last operation for git commit message
     constructor(memoryFilePath, searchIntegrator = null) {
         this.memoryFilePath = memoryFilePath;
-        this.cache = null;  // Simple memory cache: { data, mtime, timestamp }
-        this.fileLock = null;  // File lock state
-        this.isWindows = process.platform === 'win32';
+        this.cache = null;
         this.searchIntegrator = searchIntegrator;
         this.lastOperation = null;
         this._lockQueue = Promise.resolve();
         this._release = null;
+        this._hasFileLock = false;
+        this.lockDir = path.join(path.dirname(this.memoryFilePath), '.memory.lock');
     }
 
     // Set operation context for git commit message (auto-truncated)
@@ -555,29 +555,107 @@ export class KnowledgeGraphManager {
         return (now - this.cache.timestamp) < ttl;
     }
     
-    // Acquire file lock
-    // Windows 文件锁机制有多"幽默"？
-    // - fs.lock() 在 Windows 上返回 -4094 错误码 (EBUSY)
-    // - Node.js 文档说 "Windows doesn't support file locks"
-    // - 所以我们选择：相信操作系统 + 原子性写入
-    async _acquireLock() {
+    // In-process Promise queue lock: serializes within the same Node.js instance
+    async _acquireInProcessLock() {
         let release;
         const wait = new Promise(resolve => { release = resolve; });
         const prev = this._lockQueue;
         this._lockQueue = this._lockQueue.then(() => wait);
         await prev;
+        return release;
+    }
+
+    // Cross-process file lock via mkdir atomicity (works on Linux/macOS/Windows)
+    // Check if a stale lock can be stolen (owner PID is gone)
+    async _tryStealLock() {
+        try {
+            const infoStr = await fs.readFile(path.join(this.lockDir, 'info'), 'utf-8');
+            const info = JSON.parse(infoStr);
+            const age = Date.now() - (info.ts || 0);
+
+            // Only steal if lock is older than 10 seconds
+            if (age < 10000) return false;
+
+            // Check if owner process is still alive
+            if (info.pid && info.pid > 0) {
+                try {
+                    process.kill(info.pid, 0);
+                    return false; // still alive
+                } catch {
+                    // process is dead, safe to steal
+                }
+            }
+
+            await fs.unlink(path.join(this.lockDir, 'info'));
+            await fs.rmdir(this.lockDir);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    async _acquireFileLock() {
+        const maxRetries = 10;
+        const retryDelay = 300;
+
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                await fs.mkdir(this.lockDir);
+                await fs.writeFile(
+                    path.join(this.lockDir, 'info'),
+                    JSON.stringify({ pid: process.pid, ts: Date.now() })
+                );
+                this._hasFileLock = true;
+                return;
+            } catch (err) {
+                if (err.code !== 'EEXIST') throw err;
+
+                // Try to steal stale lock before retrying
+                if (await this._tryStealLock()) continue;
+
+                if (attempt < maxRetries - 1) {
+                    await new Promise(r => setTimeout(r, retryDelay));
+                }
+            }
+        }
+
+        throw new Error(
+            `Failed to acquire file lock for ${this.memoryFilePath} ` +
+            `- another process may be holding it`
+        );
+    }
+
+    async _releaseFileLock() {
+        if (!this._hasFileLock) return;
+        this._hasFileLock = false;
+        try {
+            await fs.unlink(path.join(this.lockDir, 'info'));
+            await fs.rmdir(this.lockDir);
+        } catch {
+            // best effort - lock may have been stolen due to timeout
+        }
+    }
+
+    async _acquireLock() {
+        const release = await this._acquireInProcessLock();
+        try {
+            await this._acquireFileLock();
+        } catch (err) {
+            release();
+            throw err;
+        }
         this._release = release;
     }
-    
-    // Release file lock
+
     async _releaseLock() {
+        await this._releaseFileLock();
         if (this._release) {
             const release = this._release;
             this._release = null;
             release();
         }
     }
-    
+
     // Run a function with exclusive access (serializes load-modify-write cycle)
     async _runExclusive(fn) {
         await this._acquireLock();
@@ -587,10 +665,24 @@ export class KnowledgeGraphManager {
             await this._releaseLock();
         }
     }
-    
+
     // Close and cleanup resources
     async close() {
         await this._releaseLock();
+        await this._removeLockDir();
+    }
+
+    async _removeLockDir() {
+        try {
+            const infoStr = await fs.readFile(path.join(this.lockDir, 'info'), 'utf-8');
+            const info = JSON.parse(infoStr);
+            if (info.pid === process.pid) {
+                await fs.unlink(path.join(this.lockDir, 'info'));
+                await fs.rmdir(this.lockDir);
+            }
+        } catch {
+            // best effort
+        }
     }
     
     async loadGraph() {
@@ -2245,6 +2337,31 @@ async function main() {
     const token = tokenIdx !== -1 ? process.argv[tokenIdx + 1] : null;
     const startupUtc = new Date().toISOString();
     
+    // Cleanup lock on exit
+    const cleanup = async () => {
+        await knowledgeGraphManager.close();
+    };
+    for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+        process.on(sig, async () => {
+            await cleanup();
+            process.exit(0);
+        });
+    }
+    // Sync cleanup for process.on('exit') which can't handle async
+    process.on('exit', () => {
+        const lockDir = knowledgeGraphManager?.lockDir;
+        const infoPath = path.join(lockDir || '', 'info');
+        try {
+            if (existsSync(infoPath)) {
+                const info = JSON.parse(readFileSync(infoPath, 'utf-8'));
+                if (info.pid === process.pid) {
+                    unlinkSync(infoPath);
+                    rmdirSync(lockDir);
+                }
+            }
+        } catch {}
+    });
+
     function checkToken(req, res) {
         if (!token) return true;
         const queryToken = req.query.token;

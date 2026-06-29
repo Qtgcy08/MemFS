@@ -163,16 +163,14 @@ function extractBoldTokens(text) {
 
 ### 6. 并发安全锁
 
-```javascript
-// Promise 链式互斥锁
-let _operationQueue = Promise.resolve();
-async _runExclusive(fn) { ... }
-```
-
-**功能：**
-- 串行化所有变异方法的 load-modify-write 周期
+**进程内锁 (v3.7.12)：**
+- `_lockQueue` Promise 链式互斥，串行化同一实例内的 load-modify-write 周期
 - 替代原来 `saveGraph()` 内的空操作锁
-- 跨方法并发测试 30 次 createEntity + 10 混合操作全部通过
+
+**跨进程文件锁：**
+- `fs.mkdir` 原子锁（`.memory.lock/`），支持多 Node.js 实例共享 JSONL
+- 10×300ms 重试，PID + 超时检测自动回收过期锁
+- SIGINT/SIGTERM/SIGHUP/exit 时自动清理
 
 ---
 

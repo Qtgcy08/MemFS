@@ -1,6 +1,6 @@
 # AGENTS.md
 
-**MemFS** — One Node.js process, stdio/SSE MCP. Knowledge graph with filesystem-inspired data model.
+**MemFS** — Simple cross-process file lock, stdio/SSE MCP. Knowledge graph with filesystem-inspired data model.
 
 **Stack:** Node.js 22+ ES Modules | MCP SDK 1.29.0 | Zod | Fuse.js 7.1.0 | Pure JS BM25
 
@@ -44,6 +44,14 @@ Three JSONL types: `entity` (with `observationIds`), `observation` (shared inode
 - Observations are copy-on-write; duplicates by content share a single ID
 - `createRelation` filters exact duplicates by (from, to, relationType) triple at API level
 - MEMORY_DIR must be a directory path (not file path); server reads `memory.jsonl` inside it
+
+## Concurrency
+
+File lock via `fs.mkdir` atomicity (`.memory.lock/` + `info` PID file). Cross-process safe, works on Linux/macOS/Windows.
+- Same-process: Promise queue serializes within one Node.js instance
+- Cross-process: `mkdir` based exclusive lock, 10×300ms retry
+- Stale lock: auto-stolen if >10s old and owner PID dead
+- Lock auto-cleaned on SIGINT/SIGTERM/SIGHUP/exit
 
 ## gitSync
 
