@@ -1739,10 +1739,6 @@ const ObservationSchema = z.object({
     createdAt: z.string().nullable()
 });
 // The server instance and tools exposed to Claude
-const server = new McpServer({
-    name: "MemFS",
-    version: VERSION,
-});
 // Console buffer for getConsole tool (with deduplication)
 const consoleBuffer = [];
 const seenMessages = new Set();
@@ -1756,6 +1752,12 @@ console.error = (...args) => {
     }
     originalConsoleError.apply(console, args);
 };
+const server = createMemfsServer();
+function createMemfsServer() {
+const server = new McpServer({
+    name: "MemFS",
+    version: VERSION,
+});
 // Register getConsole tool
 server.registerTool("getConsole", {
     title: "Get Console",
@@ -2257,6 +2259,8 @@ if (process.argv.includes('--duplicates')) {
         };
     });
 }
+return server;
+}
 /**
  * Create and initialize managers (for programmatic use / visualizer)
  * Returns { knowledgeGraphManager, searchIntegrator, memoryDir }
@@ -2381,7 +2385,8 @@ async function main() {
             const transport = new SSEServerTransport(endpoint, res);
             transports[transport.sessionId] = transport;
             res.on('close', () => { delete transports[transport.sessionId]; });
-            await server.connect(transport);
+            const sseServer = createMemfsServer();
+            await sseServer.connect(transport);
         });
         app.post('/message', async (req, res) => {
             if (!checkToken(req, res)) return;
