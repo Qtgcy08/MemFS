@@ -94,15 +94,23 @@ node index.js --memory-dir ~/my-knowledge --git-autocommit --duplicates --autogc
 |-----|-------------|-------------|
 | `--memory-dir <path>` | `MEMORY_DIR` | Data directory |
 | `--git-autocommit` | `GITAUTOCOMMIT=true` | Enable git auto-commit |
-| `--mode sse` | — | SSE HTTP mode |
-| `--port <n>` | — | SSE port |
-| `--token <str>` | — | SSE auth token |
+| `--mode sse` | — | Legacy SSE HTTP mode (`/sse` + `/message`) |
+| `--mode http` | — | Streamable HTTP mode (`/mcp`) |
+| `--mode both` | — | SSE + Streamable HTTP on the same port |
+| `--port <n>` | — | HTTP server port |
+| `--token <str>` | — | HTTP auth token (query `?token=` or Bearer header) |
 | `--duplicates` | — | Enable analyzeDuplicates dedup tool |
 | `--autogc <N>` | — | Auto `git gc --auto` every N commits |
 
-### SSE Mode
+### HTTP Modes
 
-HTTP SSE transport with token auth — `--mode sse --port 3100 --token mytoken`.
+Three HTTP modes share the same port and token auth (query `?token=` or `Authorization: Bearer`):
+
+- `--mode sse` — legacy HTTP+SSE transport (`GET /sse` + `POST /message?sessionId=`), for old MCP clients
+- `--mode http` — Streamable HTTP transport (`GET/POST/DELETE /mcp`, stateful sessions via the `mcp-session-id` header)
+- `--mode both` — both transports on the same instance, so old and new clients can connect simultaneously
+
+Examples: `--mode sse --port 3100 --token mytoken`, `--mode http --port 3100 --token mytoken`, `--mode both --port 3100 --token mytoken`.
 
 ### entityType Multi-Dimensional Paths
 
@@ -357,9 +365,11 @@ await updateNode({
 | `--git-autocommit` | `GITAUTOCOMMIT=true` | Enable Git auto-commit | `false` |
 | `--duplicates` | — | Enable analyzeDuplicates dedup tool | off |
 | `--autogc <N>` | — | Auto `git gc --auto` every N commits | `20` |
-| `--mode sse` | — | SSE HTTP mode | stdio |
-| `--port <n>` | — | SSE port | `3100` |
-| `--token <str>` | — | SSE auth token | none |
+| `--mode sse` | — | Legacy SSE HTTP mode (`/sse` + `/message`) | stdio |
+| `--mode http` | — | Streamable HTTP mode (`/mcp`) | stdio |
+| `--mode both` | — | SSE + Streamable HTTP on the same port | stdio |
+| `--port <n>` | — | HTTP server port | `3100` |
+| `--token <str>` | — | HTTP auth token (query or Bearer) | none |
 
 ---
 

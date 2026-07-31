@@ -31,7 +31,9 @@
 |-----|-------------|-------------|
 | `--memory-dir <path>` | `MEMORY_DIR` | Data directory (default: `~/.memory`) |
 | `--git-autocommit` | `GITAUTOCOMMIT=true` | Enable git auto-commit |
-| `--mode sse` | — | SSE HTTP mode |
+| `--mode sse` | — | Legacy SSE HTTP mode (`/sse` + `/message`) |
+| `--mode http` | — | Streamable HTTP mode (`/mcp`) |
+| `--mode both` | — | SSE + Streamable HTTP coexisting on one port |
 | `--port <n>` | — | SSE port (default 3100) |
 | `--token <str>` | — | SSE auth token |
 | `--duplicates` | — | Enable analyzeDuplicates tool (optional) |
@@ -85,6 +87,12 @@ node test_mcp_dedup.mjs
 
 # Hybrid search
 MEMORY_DIR=test_cache node test_mcp_hybrid_search.mjs
+
+# Streamable HTTP / coexistence (spawns real servers: --mode both/http/sse)
+node test_mcp_streamable_http.mjs
+
+# External write awareness (multi-instance shared JSONL, mtime-based reload)
+node test_mcp_external_write.mjs
 
 # Git sync scenarios (standalone)
 node test_gitsync.mjs

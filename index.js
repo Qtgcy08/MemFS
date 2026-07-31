@@ -2,6 +2,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import express from 'express';
 import { z } from "zod";
 import Fuse from 'fuse.js';
@@ -11,6 +13,7 @@ import { fileURLToPath } from 'url';
 import { homedir, hostname, userInfo } from 'os';
 import { execSync, execFileSync, execFile } from 'child_process';
 import { createRequire } from 'module';
+import { randomUUID } from 'node:crypto';
 const require = createRequire(import.meta.url);
 const { version: VERSION } = require('./package.json');
 
@@ -547,11 +550,24 @@ export class KnowledgeGraphManager {
         this.cache = null;
     }
     
-    // Check if cache is valid (within TTL)
-    _isCacheValid() {
+    // Check if cache is valid: JSONL file unchanged since last load, and within TTL
+    async _isCacheValid() {
         if (!this.cache) return false;
+        let stat = null;
+        try {
+            stat = await fs.stat(this.memoryFilePath);
+        } catch {
+            // File may be missing (fresh instance)
+        }
+        const fileExists = stat !== null;
+        // Another process may have rewritten the same JSONL: reload as soon as
+        // mtime/size/existence changes, regardless of the in-memory timestamp
+        if (this.cache.fileExists !== fileExists) return false;
+        if (fileExists && (this.cache.mtimeMs !== stat.mtimeMs || this.cache.size !== stat.size)) {
+            return false;
+        }
         const now = Date.now();
-        const ttl = 30000;  // 30 seconds TTL
+        const ttl = 30000;  // 30 seconds TTL fallback
         return (now - this.cache.timestamp) < ttl;
     }
     
@@ -687,9 +703,12 @@ export class KnowledgeGraphManager {
     
     async loadGraph() {
         // Check cache first
-        if (this._isCacheValid()) {
+        if (await this._isCacheValid()) {
             return this.cache.data;
         }
+        // Reloading from disk: the file may have been changed by another
+        // process, so the search index is stale too — schedule a rebuild
+        this.searchIntegrator?.rebuildIndex();
         
         try {
             const data = await fs.readFile(this.memoryFilePath, "utf-8");
@@ -784,7 +803,7 @@ export class KnowledgeGraphManager {
                     relations: rawRelations,
                     _lastModified: getLatestTimestamp(migratedObservationsList)
                 };
-                this._updateCache(migratedResult);
+                await this._updateCache(migratedResult);
                 return migratedResult;
             }
             
@@ -818,24 +837,39 @@ export class KnowledgeGraphManager {
                 })),
                 _lastModified: getLatestTimestamp(newFormatObservations)
             };
-            this._updateCache(newFormatResult);
+            await this._updateCache(newFormatResult);
             return newFormatResult;
         }
         catch (error) {
             if (error instanceof Error && 'code' in error && error.code === "ENOENT") {
                 const emptyResult = { entities: [], observations: [], definitions: [], relations: [] };
-                this._updateCache(emptyResult);
+                await this._updateCache(emptyResult);
                 return emptyResult;
             }
             throw error;
         }
     }
     
-    // Update cache after graph is modified
-    _updateCache(graph) {
+    // Update cache after graph is modified; record file state so subsequent
+    // checks can detect external writes (mtime/size) by other instances
+    async _updateCache(graph) {
+        let mtimeMs = null;
+        let size = null;
+        let fileExists = false;
+        try {
+            const stat = await fs.stat(this.memoryFilePath);
+            fileExists = true;
+            mtimeMs = stat.mtimeMs;
+            size = stat.size;
+        } catch {
+            // File may not exist yet (fresh instance)
+        }
         this.cache = {
             data: graph,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            fileExists,
+            mtimeMs,
+            size
         };
     }
     
@@ -2341,6 +2375,8 @@ async function main() {
     const tokenIdx = process.argv.indexOf('--token');
     const token = tokenIdx !== -1 ? process.argv[tokenIdx + 1] : null;
     const startupUtc = new Date().toISOString();
+    // Shared session registry across HTTP transports (SSE + Streamable HTTP)
+    const transports = {};
     
     // Cleanup lock on exit
     const cleanup = async () => {
@@ -2348,6 +2384,11 @@ async function main() {
     };
     for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
         process.on(sig, async () => {
+            for (const sessionId of Object.keys(transports)) {
+                try {
+                    await transports[sessionId].close();
+                } catch {}
+            }
             await cleanup();
             process.exit(0);
         });
@@ -2377,31 +2418,106 @@ async function main() {
         return false;
     }
     
-    if (mode === 'sse') {
-        const transports = {};
+    if (mode === 'sse' || mode === 'http' || mode === 'both') {
         const app = express();
-        app.get('/sse', async (req, res) => {
-            if (!checkToken(req, res)) return;
-            const endpoint = token ? `/message?token=${token}` : '/message';
-            const transport = new SSEServerTransport(endpoint, res);
-            transports[transport.sessionId] = transport;
-            res.on('close', () => { delete transports[transport.sessionId]; });
-            const sseServer = createMemfsServer();
-            await sseServer.connect(transport);
-        });
-        app.post('/message', async (req, res) => {
-            if (!checkToken(req, res)) return;
-            const sessionId = req.query.sessionId;
-            const transport = transports[sessionId];
-            if (transport) {
-                await transport.handlePostMessage(req, res);
-            } else {
-                res.status(404).end('Session not found');
-            }
-        });
+        // Shared JSON body parser for both transports (4MB limit, matches SSE raw-body limit)
+        app.use(express.json({ limit: '4mb' }));
+
+        // Legacy HTTP+SSE transport (deprecated by the MCP spec, kept for old clients)
+        if (mode === 'sse' || mode === 'both') {
+            app.get('/sse', async (req, res) => {
+                if (!checkToken(req, res)) return;
+                const endpoint = token ? `/message?token=${token}` : '/message';
+                const transport = new SSEServerTransport(endpoint, res);
+                transports[transport.sessionId] = transport;
+                res.on('close', () => { delete transports[transport.sessionId]; });
+                const sseServer = createMemfsServer();
+                await sseServer.connect(transport);
+            });
+            app.post('/message', async (req, res) => {
+                if (!checkToken(req, res)) return;
+                const sessionId = req.query.sessionId;
+                const transport = transports[sessionId];
+                if (transport instanceof SSEServerTransport) {
+                    await transport.handlePostMessage(req, res, req.body);
+                } else {
+                    res.status(404).end('Session not found');
+                }
+            });
+        }
+
+        // Streamable HTTP transport (GET/POST/DELETE on a single endpoint)
+        if (mode === 'http' || mode === 'both') {
+            app.all('/mcp', async (req, res) => {
+                if (!checkToken(req, res)) return;
+                try {
+                    const sessionId = req.headers['mcp-session-id'];
+                    let transport = sessionId ? transports[sessionId] : undefined;
+                    if (transport && !(transport instanceof StreamableHTTPServerTransport)) {
+                        res.status(400).json({
+                            jsonrpc: '2.0',
+                            error: {
+                                code: -32000,
+                                message: 'Bad Request: Session exists but uses a different transport protocol'
+                            },
+                            id: null
+                        });
+                        return;
+                    }
+                    if (!transport && req.method === 'POST' && isInitializeRequest(req.body)) {
+                        transport = new StreamableHTTPServerTransport({
+                            sessionIdGenerator: () => randomUUID(),
+                            // sessionId is only generated while handling the initialize
+                            // request, so register the session from this callback
+                            onsessioninitialized: (sid) => {
+                                transports[sid] = transport;
+                            },
+                        });
+                        transport.onclose = () => {
+                            const sid = transport.sessionId;
+                            if (sid && transports[sid] === transport) {
+                                delete transports[sid];
+                            }
+                        };
+                        const httpServer = createMemfsServer();
+                        await httpServer.connect(transport);
+                    }
+                    if (!transport) {
+                        res.status(400).json({
+                            jsonrpc: '2.0',
+                            error: {
+                                code: -32000,
+                                message: 'Bad Request: No valid session ID provided'
+                            },
+                            id: null
+                        });
+                        return;
+                    }
+                    await transport.handleRequest(req, res, req.body);
+                } catch (error) {
+                    console.error('[MCP Server] Streamable HTTP error:', error);
+                    if (!res.headersSent) {
+                        res.status(500).json({
+                            jsonrpc: '2.0',
+                            error: {
+                                code: -32603,
+                                message: 'Internal server error'
+                            },
+                            id: null
+                        });
+                    }
+                }
+            });
+        }
+
         app.listen(port);
+        const modeLabel = mode === 'both'
+            ? 'SSE + Streamable HTTP'
+            : mode === 'http'
+                ? 'Streamable HTTP'
+                : 'SSE';
         const authMsg = token ? `, token auth enabled` : ', no auth';
-        console.error(`[MCP Server] MemFS v${VERSION} running on SSE :${port}${authMsg}`);
+        console.error(`[MCP Server] MemFS v${VERSION} running on ${modeLabel} :${port}${authMsg}`);
     } else {
         const transport = new StdioServerTransport();
         await server.connect(transport);

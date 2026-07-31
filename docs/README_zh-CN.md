@@ -93,15 +93,23 @@ node index.js --memory-dir ~/my-knowledge --git-autocommit --duplicates --autogc
 |------|---------|------|
 | `--memory-dir <path>` | `MEMORY_DIR` | 数据目录 |
 | `--git-autocommit` | `GITAUTOCOMMIT=true` | 启用 Git 自动提交 |
-| `--mode sse` | — | SSE HTTP 模式 |
-| `--port <n>` | — | SSE 端口 |
-| `--token <str>` | — | SSE 认证 token |
+| `--mode sse` | — | 传统 SSE HTTP 模式（`/sse` + `/message`） |
+| `--mode http` | — | Streamable HTTP 模式（`/mcp`） |
+| `--mode both` | — | 同一端口并存 SSE + Streamable HTTP |
+| `--port <n>` | — | HTTP 服务端口 |
+| `--token <str>` | — | HTTP 认证 token（query 或 Bearer 头） |
 | `--duplicates` | — | 启用 analyzeDuplicates 查重工具 |
 | `--autogc <N>` | — | 自动 `git gc --auto`（默认 20 次提交） |
 
-### SSE 模式
+### HTTP 模式
 
-HTTP SSE 传输层 + token 认证 — `--mode sse --port 3100 --token mytoken`。
+三种 HTTP 模式共用同一端口与 token 认证（`?token=` 或 `Authorization: Bearer`）：
+
+- `--mode sse` — 传统 HTTP+SSE 传输（`GET /sse` + `POST /message?sessionId=`），兼容旧 MCP 客户端
+- `--mode http` — Streamable HTTP 传输（`GET/POST/DELETE /mcp`，通过 `mcp-session-id` 头维护有状态会话）
+- `--mode both` — 同一实例同时提供两种传输，新旧客户端可同时连接
+
+示例：`--mode sse --port 3100 --token mytoken`、`--mode http --port 3100 --token mytoken`、`--mode both --port 3100 --token mytoken`。
 
 ### entityType 多维路径
 
@@ -376,9 +384,11 @@ await addObservation({
 | `--git-autocommit` | `GITAUTOCOMMIT=true` | 启用 Git 自动提交 | `false` |
 | `--duplicates` | — | 启用 analyzeDuplicates 查重 | 关闭 |
 | `--autogc <N>` | — | 自动 `git gc --auto` | `20` |
-| `--mode sse` | — | SSE HTTP 模式 | stdio |
-| `--port <n>` | — | SSE 端口 | `3100` |
-| `--token <str>` | — | SSE 认证 token | 无 |
+| `--mode sse` | — | 传统 SSE HTTP 模式（`/sse` + `/message`） | stdio |
+| `--mode http` | — | Streamable HTTP 模式（`/mcp`） | stdio |
+| `--mode both` | — | 同一端口并存 SSE + Streamable HTTP | stdio |
+| `--port <n>` | — | HTTP 服务端口 | `3100` |
+| `--token <str>` | — | HTTP 认证 token（query 或 Bearer） | 无 |
 
 ---
 
