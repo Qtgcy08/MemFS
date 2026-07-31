@@ -1,6 +1,6 @@
 {
   "name": "@qty/memfs",
-  "version": "3.7.13",
+  "version": "3.8.1",
   "description": "Knowledge graph management system with BM25 + fuzzy search, inspired by filesystem concepts",
   "type": "module",
   "main": "index.js",
