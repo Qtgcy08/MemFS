@@ -1773,6 +1773,7 @@ server.registerTool("getConsole", {
     // Force reload on demand (e.g., after external git operations)
     if (reloadnow) {
         console.error('[MCP Server] Reload requested: clearing memory cache');
+        SKILL_CONTENT = null;  // also reload SKILL.md
         const reloadStart = Date.now();
         knowledgeGraphManager._clearCache();
         searchIntegrator.isIndexed = false;
@@ -1968,7 +1969,7 @@ server.registerTool("recycleObservation", {
     description: "Permanently delete observations. Orphaned observations are deleted directly. Referenced observations are skipped unless force=true. Returns original content for potential undo.",
     inputSchema: {
         observationIds: z.array(z.number()).describe("Array of observation IDs to permanently delete"),
-        force: z.boolean().optional().default(false).describe("Force delete even if observation is still referenced by entities")
+        force: z.boolean().optional().default(false).describe("Force delete even if observation is still referenced by entities. Must ask for user confirmation before using.")
     },
 }, async ({ observationIds, force }) => {
     const result = await knowledgeGraphManager.recycleObservation(observationIds, force);
