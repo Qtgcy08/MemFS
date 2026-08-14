@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcpServers": {
+    "memory": {
+      "type": "local",
+      "command": ["node", "/home/qty/ai/MCPs/MemFS/index.js", "--memory-dir", "/home/qty/ai/memories/memfs", "--git-autocommit", "--duplicates", "--autogc"],
+      "enabled": true
+    }
+  }
+}

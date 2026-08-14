@@ -75,6 +75,34 @@ function tokenizeForIndex(text) {
     return Array.from(tokens);
 }
 
+// Extract atomic tokens from entityType multi-dimensional paths.
+// e.g. '/社会学/人物/|/经济学/人物/' → ['社会学', '人物', '经济学', '/社会学/人物/', '/经济学/人物/']
+function tokenizeEntityTypePath(typeStr) {
+    if (!typeStr || (!typeStr.includes('/') && !typeStr.includes('|'))) return [];
+    const tokens = new Set();
+    const paths = typeStr.split('|').map(p => p.trim()).filter(Boolean);
+    for (const p of paths) {
+        tokens.add(p);
+        p.split('/').filter(Boolean).forEach(n => tokens.add(n));
+    }
+    return Array.from(tokens);
+}
+
+/**
+ * Extract **XX** bold markers from text
+ * Returns array of XX content (without ** delimiters)
+ */
+function extractBoldTokens(text) {
+    if (!text || typeof text !== 'string') return [];
+    const tokens = [];
+    const regex = /\*\*([^*]+)\*\*/g;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+        tokens.push(match[1].trim());
+    }
+    return tokens.filter(Boolean);
+}
+
 /**
  * BM25 standard parameters
  * k1: term frequency saturation parameter (typical value: 1.2-2.0)
@@ -106,6 +134,9 @@ export class NaturalTfIdfSearcher {
         this.docLengths = new Map(); // docId -> token count
         this.avgDocLength = 0;       // Average document length
         
+        // Bold token boost map: docId -> Set of bold tokens
+        this.boldDocTokens = new Map();
+
         // Index built flag
         this.indexBuilt = false;
 
@@ -128,6 +159,7 @@ export class NaturalTfIdfSearcher {
         this.invertedIndex.clear();
         this.docFrequency.clear();
         this.docLengths.clear();
+        this.boldDocTokens.clear();
 
         // Build observation content lookup
         const obsContentMap = new Map();
@@ -140,10 +172,11 @@ export class NaturalTfIdfSearcher {
             this._addDocument(entity.name, entity.name, 'name', entity);
         });
 
-        // Index entity types
+        // Index entity types (with multi-dimensional path tokenization)
         entities.forEach(entity => {
             if (entity.entityType) {
-                this._addDocument(entity.entityType, entity.name, 'entityType', entity);
+                const pathTokens = tokenizeEntityTypePath(entity.entityType);
+                this._addDocument(entity.entityType, entity.name, 'entityType', entity, null, pathTokens);
             }
         });
 
@@ -188,15 +221,24 @@ export class NaturalTfIdfSearcher {
     /**
       * Add a document to the index
       */
-    _addDocument(content, entityName, field, original, observationId = null) {
+    _addDocument(content, entityName, field, original, observationId = null, extraTokens = []) {
         const docId = field === 'observation'
             ? `obs:${observationId}`
             : `entity:${entityName}:${field}`;
 
         const index = this.indexToDocId.length;
 
-        // Generate n-gram tokens
-        const tokens = new Set(tokenizeForIndex(content));
+        // Extract **XX** bold markers before n-gram tokenization
+        const boldTokens = extractBoldTokens(content);
+        const cleanContent = content.replace(/\*\*[^*]+\*\*/g, '');
+
+        // Generate n-gram tokens + extra tokens (e.g. entityType path nodes) + bold atomic tokens
+        const tokens = new Set([...tokenizeForIndex(cleanContent), ...extraTokens, ...boldTokens]);
+
+        // Store bold tokens for scoring boost
+        if (boldTokens.length > 0) {
+            this.boldDocTokens.set(docId, new Set(boldTokens));
+        }
 
         this.documents.set(docId, {
             entityName,
@@ -256,7 +298,10 @@ export class NaturalTfIdfSearcher {
         const numerator = f * (BM25_K1 + 1);
         const denominator = f + BM25_K1 * (1 - BM25_B + (BM25_B * docLength / this.avgDocLength));
 
-        return idf * (numerator / denominator);
+        // 1.5x boost for **XX** bold tokens
+        const boost = this.boldDocTokens.get(docId)?.has(token) ? 1.5 : 1.0;
+
+        return idf * (numerator / denominator) * boost;
     }
 
     /**
@@ -270,6 +315,26 @@ export class NaturalTfIdfSearcher {
             totalLength += length;
         });
         this.avgDocLength = this.totalDocs > 0 ? totalLength / this.totalDocs : 1;
+    }
+
+    /**
+      * Compute BM25 mean similarity between two indexed documents
+      * Sim(A→B) = Σ BM25(g, B) / |Grams(A)|
+      * Returns max(Sim(A→B), Sim(B→A)) for symmetry
+      */
+    computeDocSimilarity(docIdA, docIdB) {
+        const docA = this.documents.get(docIdA);
+        const docB = this.documents.get(docIdB);
+        if (!docA || !docB) return 0;
+
+        const tokensA = Array.from(docA.tokens);
+        const tokensB = Array.from(docB.tokens);
+        if (tokensA.length === 0 || tokensB.length === 0) return 0;
+
+        const simAB = tokensA.reduce((sum, t) => sum + this._bm25(t, docIdB), 0) / tokensA.length;
+        const simBA = tokensB.reduce((sum, t) => sum + this._bm25(t, docIdA), 0) / tokensB.length;
+
+        return Math.max(simAB, simBA);
     }
 
     /**

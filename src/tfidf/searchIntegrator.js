@@ -5,6 +5,10 @@
 
 import { HybridSearchService } from './hybridSearchService.js';
 import { TraditionalSearcher } from './traditionalSearch.js';
+import { Worker } from 'worker_threads';
+import { fileURLToPath } from 'url';
+import path from 'path';
+import os from 'os';
 
 function formatIndexSize(sizeBytes) {
     if (sizeBytes >= 1024 * 1024) {
@@ -98,7 +102,7 @@ export class SearchIntegrator {
      */
     async searchNode(query, options = {}) {
         const {
-            basicFetch = false,  // Default: hybrid search
+            legacyGrep = false,  // Default: hybrid search
             time = false,
             limit = 15,          // Default: 15 results
             maxObservationsPerEntity = 5,  // Default: 5 per entity
@@ -113,7 +117,7 @@ export class SearchIntegrator {
         const graph = await this.manager.loadGraph();
 
         // Mode selection
-        if (basicFetch) {
+        if (legacyGrep) {
             // Traditional search mode
             const result = this.traditionalSearcher.search(query, graph, {
                 time,
@@ -341,12 +345,14 @@ export class SearchIntegrator {
             // Take top totalObsLimit observations
             matchedObservations = scoredObservations
                 .slice(0, totalObsLimit)
-                .map(item => ({
-                    id: item.id,
-                    content: item.obs.content,
-                    createdAt: time ? (formatTimestampForApi(item.obs.createdAt) ?? null) : null,
-                    updatedAt: time ? (formatTimestampForApi(item.obs.updatedAt) ?? null) : null
-                }));
+                .map(item => {
+                    if (!time) return { id: item.id, content: item.obs.content };
+                    const createdAt = formatTimestampForApi(item.obs.createdAt) ?? null;
+                    const updatedAt = formatTimestampForApi(item.obs.updatedAt) ?? null;
+                    const result = { id: item.id, content: item.obs.content, createdAt };
+                    if (updatedAt !== null) result.updatedAt = updatedAt;
+                    return result;
+                });
         }
 
         return {
@@ -412,5 +418,263 @@ export class SearchIntegrator {
             hybridStatus: this.hybridService.getStatus(),
             isIndexed: this.isIndexed
         };
+    }
+
+    /**
+     * Analyze duplicates across observations, entities, and relations
+     * Uses BM25 mean similarity + inverted index pre-filtering
+     */
+    async analyzeDuplicates({ threshold = 0.8, scope = 'all', maxPairs = 50 } = {}) {
+        const startTime = Date.now();
+        const graph = await this.manager.loadGraph();
+        await this.ensureIndex();
+
+        const bm25 = this.hybridService.tfidfSearcher;
+        const result = {
+            observationPairs: [],
+            entityPairs: [],
+            relationDuplicates: [],
+            stats: { duration: 0, candidatesChecked: 0, pairsFound: 0 }
+        };
+
+        const obsScope = scope === 'all' || scope === 'observation';
+        const entityScope = scope === 'all' || scope === 'entity';
+
+        if (obsScope) {
+            const obsDocIds = [];
+            bm25.documents.forEach((doc, docId) => {
+                if (docId.startsWith('obs:')) obsDocIds.push(docId);
+            });
+            result._obsDocIds = obsDocIds;
+            result._obsMap = Array.from(graph.observations.map(o => ['obs:' + o.id, o.content]));
+        }
+        if (entityScope) {
+            const entityNames = [];
+            bm25.documents.forEach((doc, docId) => {
+                if (docId.startsWith('entity:') && !entityNames.includes(doc.entityName)) {
+                    entityNames.push(doc.entityName);
+                }
+            });
+            result._entityNames = entityNames;
+        }
+
+        const workerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dedupWorker.js');
+        const allWorkers = [];
+
+        // --- Concurrent dispatch: observation + entity workers ---
+        if (obsScope && result._obsDocIds.length >= 50) {
+            const numWorkers = Math.min(os.cpus().length || 4, 8);
+                const chunkSize = Math.ceil(result._obsDocIds.length / numWorkers);
+            const chunks = [];
+            for (let i = 0; i < result._obsDocIds.length; i += chunkSize) {
+                chunks.push(result._obsDocIds.slice(i, i + chunkSize));
+            }
+            for (const chunk of chunks) {
+                allWorkers.push(new Promise((resolve, reject) => {
+                    const w = new Worker(workerPath, {
+                        workerData: {
+                            mode: 'obs',
+                            memoryFilePath: this.manager.memoryFilePath,
+                            chunk, threshold, maxPairs,
+                            obsMap: result._obsMap
+                        }
+                    });
+                    w.on('message', resolve);
+                    w.on('error', reject);
+                    w.on('exit', c => { if (c !== 0) reject(new Error(`Worker exit ${c}`)); });
+                }));
+            }
+        }
+
+        if (entityScope && result._entityNames.length >= 20) {
+            const numWorkers = Math.min(os.cpus().length || 4, 8);
+            const names = result._entityNames;
+            const chunkSize = Math.ceil(names.length / numWorkers);
+            for (let i = 0; i < names.length; i += chunkSize) {
+                const start = i;
+                const end = Math.min(i + chunkSize, names.length);
+                allWorkers.push(new Promise((resolve, reject) => {
+                    const w = new Worker(workerPath, {
+                        workerData: {
+                            mode: 'entity',
+                            memoryFilePath: this.manager.memoryFilePath,
+                            entityNames: names, start, end,
+                            threshold, maxPairs
+                        }
+                    });
+                    w.on('message', resolve);
+                    w.on('error', reject);
+                    w.on('exit', c => { if (c !== 0) reject(new Error(`Worker exit ${c}`)); });
+                }));
+            }
+        }
+
+        // --- Run all workers concurrently ---
+        const workerResults = await Promise.all(allWorkers);
+
+        // --- Process results ---
+        const allRawScores = [];
+        for (const wr of workerResults) {
+            if (wr.error) { console.error('[Dedup] Worker error:', wr.error); continue; }
+            if (wr.checked !== undefined) {
+                result.stats.candidatesChecked += wr.checked;
+            }
+            if (wr.rawScores) allRawScores.push(...wr.rawScores);
+            if (wr.pairs) {
+                result.stats.pairsFound += wr.pairs.length;
+                if (wr.pairs.length > 0 && 'observationA' in wr.pairs[0]) {
+                    result.observationPairs.push(...wr.pairs);
+                } else {
+                    result.entityPairs.push(...wr.pairs);
+                }
+            }
+        }
+
+        // --- Small datasets: inline fallback (runs after workers but small, negligible) ---
+        if (obsScope && result._obsDocIds.length < 50) {
+            const seen = new Set();
+            const pairs = [];
+            const obsMap = new Map(result._obsMap);
+            for (const docIdA of result._obsDocIds) {
+                const docA = bm25.documents.get(docIdA);
+                if (!docA) continue;
+                const sc = new Map();
+                for (const token of docA.tokens) {
+                    const df = bm25.docFrequency.get(token) || 0;
+                    if (df > 200) continue;
+                    const dm = bm25.invertedIndex.get(token);
+                    if (dm) dm.forEach((_, did) => {
+                        if (did !== docIdA && did.startsWith('obs:')) sc.set(did, (sc.get(did) || 0) + 1);
+                    });
+                }
+                const cands = Array.from(sc.entries()).filter(([, c]) => c >= 2)
+                    .sort((a, b) => b[1] - a[1]).slice(0, 100);
+                for (const [docIdB] of cands) {
+                    const pk = docIdA < docIdB ? `${docIdA}|${docIdB}` : `${docIdB}|${docIdA}`;
+                    if (seen.has(pk)) continue;
+                    seen.add(pk);
+                    const score = bm25.computeDocSimilarity(docIdA, docIdB);
+                    if (score >= threshold) pairs.push({ docIdA, docIdB, score });
+                }
+            }
+            pairs.sort((a, b) => b.score - a.score);
+            allRawScores.push(...pairs.map(p => p.score));
+            result.observationPairs = pairs.slice(0, maxPairs).map(p => ({
+                observationA: { id: parseInt(p.docIdA.replace('obs:', ''), 10), content: obsMap.get(p.docIdA) || '' },
+                observationB: { id: parseInt(p.docIdB.replace('obs:', ''), 10), content: obsMap.get(p.docIdB) || '' },
+                similarityScore: parseFloat(p.score.toFixed(4))
+            }));
+            result.stats.candidatesChecked += seen.size;
+            result.stats.pairsFound += pairs.length;
+        }
+
+        if (entityScope && result._entityNames.length < 20) {
+            const names = result._entityNames;
+            const seen = new Set();
+            const pairs = [];
+            for (let i = 0; i < names.length; i++) {
+                for (let j = i + 1; j < names.length; j++) {
+                    const nameA = names[i], nameB = names[j];
+                    let bestScore = 0, bestPair = { docIdA: null, docIdB: null };
+                    for (const [dA] of bm25.documents) {
+                        if (!dA.startsWith('entity:') || !dA.includes(nameA)) continue;
+                        for (const [dB] of bm25.documents) {
+                            if (!dB.startsWith('entity:') || !dB.includes(nameB)) continue;
+                            const pk = dA < dB ? `${dA}|${dB}` : `${dB}|${dA}`;
+                            if (seen.has(pk)) continue;
+                            seen.add(pk);
+                            const score = bm25.computeDocSimilarity(dA, dB);
+                            if (score > bestScore) { bestScore = score; bestPair = { docIdA: dA, docIdB: dB }; }
+                        }
+                    }
+                    if (bestScore >= threshold) pairs.push({ entityNameA: nameA, entityNameB: nameB, score: bestScore, ...bestPair });
+                }
+            }
+            pairs.sort((a, b) => b.score - a.score);
+            allRawScores.push(...pairs.map(p => p.score));
+            result.entityPairs = pairs.slice(0, maxPairs).map(p => ({
+                entityA: { name: p.entityNameA, matchedField: 'name', matchedContent: '' },
+                entityB: { name: p.entityNameB, matchedField: 'name', matchedContent: '' },
+                similarityScore: parseFloat(p.score.toFixed(4))
+            }));
+            result.stats.candidatesChecked += seen.size;
+            result.stats.pairsFound += pairs.length;
+        }
+
+        // Normalize similarity scores to 0-1 (same approach as searchNode)
+        const maxScore = allRawScores.length > 0 ? Math.max(...allRawScores) : 1;
+        for (const p of result.observationPairs) {
+            p.normalizedScore = parseFloat((p.similarityScore / maxScore).toFixed(4));
+            delete p.similarityScore;
+        }
+        for (const p of result.entityPairs) {
+            p.normalizedScore = parseFloat((p.similarityScore / maxScore).toFixed(4));
+            delete p.similarityScore;
+        }
+
+        // Build distribution histogram from all normalized scores (before maxPairs trim)
+        const allNormScores = allRawScores.map(s => s / maxScore);
+        const bins = 10;
+        const normHist = new Array(bins).fill(0);
+        for (const s of allNormScores) {
+            if (s >= 0) normHist[Math.min(Math.floor(s * bins), bins - 1)]++;
+        }
+        result.distribution = {
+            totalCandidatesChecked: result.stats.candidatesChecked,
+            totalPairsAboveThreshold: allNormScores.length,
+            totalReturned: result.observationPairs.length + result.entityPairs.length,
+            normalizedRange: {
+                min: allNormScores.length > 0 ? Math.min(...allNormScores) : 0,
+                max: allNormScores.length > 0 ? Math.max(...allNormScores) : 0
+            },
+            histogram: normHist.map((count, i) => ({
+                range: [(i / bins).toFixed(2), ((i + 1) / bins).toFixed(2)],
+                count,
+                pct: allNormScores.length > 0 ? parseFloat((count / allNormScores.length * 100).toFixed(1)) : 0
+            })).filter(b => b.count > 0).reverse(),
+            suggestedThreshold: 0.8
+        };
+
+        // Sort and trim final results
+        result.observationPairs.sort((a, b) => b.normalizedScore - a.normalizedScore);
+        result.observationPairs = result.observationPairs.slice(0, maxPairs);
+        result.entityPairs.sort((a, b) => b.normalizedScore - a.normalizedScore);
+        result.entityPairs = result.entityPairs.slice(0, maxPairs);
+
+        // 3. Relation duplicates (exact (from, to) pair with multiple relationTypes)
+        if (scope === 'all' || scope === 'relation') {
+            const relationGroups = new Map();
+            graph.relations.forEach(r => {
+                const key = `${r.from}|${r.to}`;
+                if (!relationGroups.has(key)) {
+                    relationGroups.set(key, { from: r.from, to: r.to, relationTypes: [] });
+                }
+                relationGroups.get(key).relationTypes.push(r.relationType);
+            });
+
+            relationGroups.forEach(group => {
+                const unique = [...new Set(group.relationTypes)];
+                if (unique.length !== group.relationTypes.length) {
+                    const typeCounts = new Map();
+                    group.relationTypes.forEach(t => typeCounts.set(t, (typeCounts.get(t) || 0) + 1));
+                    const duplicates = Array.from(typeCounts.entries())
+                        .filter(([, count]) => count > 1)
+                        .map(([type, count]) => ({ relationType: type, count }));
+                    if (duplicates.length > 0) {
+                        result.relationDuplicates.push({
+                            from: group.from,
+                            to: group.to,
+                            duplicates
+                        });
+                    }
+                }
+            });
+        }
+
+        delete result._obsDocIds;
+        delete result._obsMap;
+        delete result._entityNames;
+        result.stats.duration = Date.now() - startTime;
+        return result;
     }
 }

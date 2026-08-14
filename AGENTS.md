@@ -1,153 +1,116 @@
 # AGENTS.md
 
-**MemFS** - Knowledge graph management system with BM25 + fuzzy search. Inspired by filesystem concepts (inode, hard links, copy-on-write).
+**MemFS** — Simple cross-process file lock, stdio/SSE MCP. Knowledge graph with filesystem-inspired data model.
 
-**Stack:** Node.js 22+ ES Modules | MCP SDK | Zod | Fuse.js 7.1.0 | Pure JS BM25
+**Stack:** Node.js 22+ ES Modules | MCP SDK 1.29.0 | Zod | Fuse.js 7.1.0 | Pure JS BM25
 
----
+## Entrypoint & Tools
 
-## Build, Lint, and Test
+- `index.js` (~2300 lines) contains everything: `KnowledgeGraphManager`, `gitSync` object, 18 MCP tool handlers, all utilities. No framework, no codegen.
+- Tools: `getConsole` `createEntity` `createRelation` `addObservation` `deleteEntity` `deleteRelation` `unlinkObservation` `recycleObservation` `getOrphanObservation` `readNode` `readObservation` `listNode` `listGraph` `searchNode` `updateNode` `updateObservation` `howWork`
+- `analyzeDuplicates` (optional, `--duplicates` flag): BM25 mean-similarity dedup tool. Default threshold 0.8 (normalized).
+- `howWork` returns `skills/memfs_best_practices/SKILL.md` (lazy-loaded)
+- `**XX**` in text fields → BM25 ×1.5 weighted atomic token, transparent to search
+- Field weights: name 5.0, entityType 2.5, definition 2.5, definitionSource 1.5, observation 1.0
+- Tool registration uses `server.registerTool(name, { inputSchema: {...} }, handler)` (older SDK pattern)
 
-```bash
-npm install
+## Search Modules (src/tfidf/)
 
-# Run server
-node index.js
-
-# With custom memory directory and git auto-commit
-MEMORY_DIR=~/data GITAUTOCOMMIT=true node index.js
-```
-
-### Testing
-```bash
-# Syntax check (fast) on changed files
-node --check index.js
-node --check src/tfidf/traditionalSearch.js
-
-# Full test suite (25 assertions across 17 MCP tools)
-node test_mcp_full.mjs
-
-# Git Sync tests
-node test_gitsync.mjs
-
-# Hybrid search specific tests
-node test_mcp_hybrid_search.mjs
-```
-
-**Test prerequisite:** `test_cache/mcp-client.js` must be copied to root before running tests from project root:
-```bash
-cp test_cache/mcp-client.js . && MEMORY_DIR=test_cache node test_mcp_full.mjs
-```
-
-### Test Files
-| File | Purpose |
-|------|---------|
-| `test_mcp_full.mjs` | 25 assertions across all MCP tools + Git Sync |
-| `test_gitsync.mjs` | Git auto-commit scenarios |
-| `test_mcp_hybrid_search.mjs` | Hybrid search specific tests |
-| `test_cache/` | Isolated test directory with own git repo and mcp-client.js |
-| `debug_search.html` | Web UI for debugging searchNode (open in browser) |
-
----
-
-## Architecture
-
-### All-in-One Entrypoint
-`index.js` (~2250 lines) contains everything: `KnowledgeGraphManager` class, all 17 MCP tool handlers, utility functions, and timestamp formatting. No framework - just a single Node.js process that speaks stdio MCP.
-
-### Search Modules (`src/tfidf/`)
 | File | Role |
 |------|------|
-| `searchIntegrator.js` | Orchestrator - routes to hybrid or traditional search |
-| `hybridSearchService.js` | BM25 + Fuse.js hybrid with gram tokenization; field weights in `DEFAULT_FIELD_WEIGHTS` |
-| `bm25Search.js` | Pure JS BM25 implementation |
+| `hybridSearchService.js` | Orchestrator — BM25 + Fuse fusion, field weights |
+| `bm25Search.js` | Pure JS BM25 with n-gram (2/3/4) tokenization |
 | `fuseSearch.js` | Fuse.js 7.1.0 wrapper |
-| `traditionalSearch.js` | Legacy keyword match fallback |
+| `traditionalSearch.js` | Legacy keyword fallback (`legacyGrep` mode) |
+| `searchIntegrator.js` | Routes to hybrid/traditional search, hosts `analyzeDuplicates()` |
+| `dedupWorker.js` | Worker thread module for dedup (parallel compute) |
 
-### Data Model (JSONL)
-```jsonl
-{"type":"entity","name":"Weber","entityType":"person","definition":"...","observationIds":[1,2]}
-{"type":"observation","id":1,"content":"...","createdAt":{"utc":"ISO8601","timezone":"Asia/Shanghai"},"updatedAt":{"utc":"ISO8601","timezone":"Asia/Shanghai"}}
-{"type":"relation","from":"Weber","to":"Durkheim","relationType":"contemporary"}
-```
+## CLI Args (args > env)
 
-`createdAt`/`updatedAt` are **sibling top-level properties** (not nested). Data layer returns raw `{utc, timezone}` objects; MCP tool handler layer formats to strings.
+| Arg | Env fallback | Description |
+|-----|-------------|-------------|
+| `--memory-dir <path>` | `MEMORY_DIR` | Data directory (default: `~/.memory`) |
+| `--git-autocommit` | `GITAUTOCOMMIT=true` | Enable git auto-commit |
+| `--mode sse` | — | Legacy SSE HTTP mode (`/sse` + `/message`) |
+| `--mode http` | — | Streamable HTTP mode (`/mcp`) |
+| `--mode both` | — | SSE + Streamable HTTP coexisting on one port |
+| `--port <n>` | — | SSE port (default 3100) |
+| `--token <str>` | — | SSE auth token |
+| `--duplicates` | — | Enable analyzeDuplicates tool (optional) |
+| `--autogc <N>` | — | Auto `git gc --auto` every N commits (default 20) |
 
-### Filesystem-Inspired Design
-| Concept | Implementation |
-|---------|---------------|
-| Inode Table | Centralized observation storage |
-| Hard Links | Multi-entity observation sharing |
-| Copy-on-Write | Updates create new observations |
-| Orphan Detection | GC for unused observations |
+## Model
 
----
+Three JSONL types: `entity` (with `observationIds`), `observation` (shared inode table, hard-link semantics), `relation` (from→to→relationType).
+- `createdAt`/`updatedAt`: stored as `{utc, timezone}`, API formats to `"YYYY-MM-DD HH:mm:ss IANA"`
+- Observations are copy-on-write; duplicates by content share a single ID
+- `createRelation` filters exact duplicates by (from, to, relationType) triple at API level
+- MEMORY_DIR must be a directory path (not file path); server reads `memory.jsonl` inside it
 
-## Key Patterns
+## Concurrency
 
-### MCP Tool Registration
+File lock via `fs.mkdir` atomicity (`.memory.lock/` + `info` PID file). Cross-process safe, works on Linux/macOS/Windows.
+- Same-process: Promise queue serializes within one Node.js instance
+- Cross-process: `mkdir` based exclusive lock, 10×300ms retry
+- Stale lock: auto-stolen if >10s old and owner PID dead
+- Lock auto-cleaned on SIGINT/SIGTERM/SIGHUP/exit
+
+## gitSync
+
+`gitSync` is a module-level object (not a class), created at `index.js:114`.
+- `gcThreshold: 0`, `gcCounter: 0` — fire-and-forget async `git gc --auto` counter
+- Auto-gc does not block the mutation pipeline; `execFile('git', ['gc', '--auto'])` is not awaited
+
+## Code Conventions
+
+4 spaces, single quotes, semicolons, max 100 chars/line. Classes PascalCase, functions camelCase, MCP tools snake_case. `console.error()` prefixes: `[Git]` `[MCP Server]` `[Stats]`. No `as any` or `@ts-ignore`.
+
+Version: `const { version: VERSION } = require('./package.json')` (line 15). No hardcoded copy.
+
+MCP tool response pattern — always `jsonContent` alongside `content[0].text`:
 ```javascript
-server.registerTool("tool_name", {
-    title: "Tool Title",
-    description: "Description",
-    inputSchema: z.object({ ... }),
-    outputSchema: z.object({ ... })
-}, async ({ params }) => {
-    const result = await manager.method(params);
-    return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-        structuredContent: result
-    };
-});
+return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+         jsonContent: result };
 ```
 
-### Timestamp Format
-- **Storage**: `{utc: "ISO8601", timezone: "IANA"}` (e.g., "Asia/Shanghai")
-- **API response**: `"YYYY-MM-DD HH:mm:ss Timezone"` (local time with IANA zone)
-- Formatting: `formatTimestamp()` for single objects, `formatObservations()` for arrays
-- `updatedAt` and `createdAt` are separate fields in storage - **both** must be mapped in data layer returns
+## Testing
 
-### VERSION Sync
-`index.js` line 16 has a **hardcoded** `const VERSION = "2.4.16"` that must be manually updated alongside `package.json`. They are out of sync after npm publish.
-
-### Console Logging
-Use `console.error()` with prefixes for auto-level detection:
-- `[GitSync]`, `[MCP Server]`, `[Stats]` → info
-- `[Deprecation]` → warn
-- `DETECTED:` → error
-
-### Git Auto-Commit (GITAUTOCOMMIT)
-- Commit message: `auto-commit:[operationContext] at [utc:...] [tz:Asia/Shanghai]`
-- Git author: `user.name: memfs-{VERSION}`, `user.email: username-memfs@hostname`
-
----
-
-## Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `MEMORY_DIR` | Data storage directory | `~/.memory` |
-| `MEMORY_FILE_PATH` | **DEPRECATED** - use MEMORY_DIR | - |
-| `GITAUTOCOMMIT` | Enable git auto-commit | `false` |
-
----
-
-## Code Style
-
-- **4 spaces**, **single quotes**, **semicolons**, max **100 chars/line**
-- Imports order: stdlib → third-party → local
-- Classes: PascalCase (`KnowledgeGraphManager`), functions/vars: camelCase
-- Constants: UPPER_SNAKE_CASE (`DEFAULT_FIELD_WEIGHTS`, `BM25_K1`)
-- MCP Tools: snake_case (`searchNode`, `recycleObservation`)
-- Never suppress types (`as any`, `@ts-ignore`)
-- Handle specific errors before generic re-throw; `process.exit(1)` for fatal main() errors
-
----
-
-## Publishing (use publish-new skill)
 ```bash
-# Say: "使用 publish-new skill 发布新版本"
-```
-Version bump: feat→minor, fix→patch, BREAKING CHANGE→major
+# Full suite (29 tests, skips SSE by default)
+MEMORY_DIR=test_cache node test_mcp_full.mjs
 
-Remember to also update `const VERSION = "..."` in `index.js` line 16.
+# SSE tests (opt-in)
+TEST_SSE=true MEMORY_DIR=test_cache node test_mcp_full.mjs
+
+# analyzeDuplicates (standalone, no MEMORY_DIR needed)
+node test_mcp_dedup.mjs
+
+# Hybrid search
+MEMORY_DIR=test_cache node test_mcp_hybrid_search.mjs
+
+# Streamable HTTP / coexistence (spawns real servers: --mode both/http/sse)
+node test_mcp_streamable_http.mjs
+
+# External write awareness (multi-instance shared JSONL, mtime-based reload)
+node test_mcp_external_write.mjs
+
+# Git sync scenarios (standalone)
+node test_gitsync.mjs
+
+# Fast syntax check
+node --check index.js
+node --check src/tfidf/bm25Search.js
+```
+
+Quirks:
+- SSE test spawns a real HTTP subprocess, skipped unless `TEST_SSE=true`
+- `test_cache/` is its own git repo, used as fixture for git tests; also in `.gitignore`
+- `mcp-client.js` in root is the authoritative version; `test_cache/mcp-client.js` is a copy that must be kept in sync
+- Dedup and gitsync tests are standalone (no MEMORY_DIR required) — they pre-write JSONL directly or use in-memory fixtures
+- `test_cache/` is gitignored — changes there won't appear in `git status`
+
+## Branches
+
+- `dev` — active development (v3.7.12)
+- `master` — stable releases (v2.5.21, fast-forwarded from origin)
+- `legacy` — v1.3.0 archive

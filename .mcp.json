@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "memfsForDev": {
+      "command": "node",
+      "args": [
+        "/home/qty/ai/projects/MemFS/index.js",
+        "--memory-dir",
+        "/home/qty/ai/projects/MemFS/memory",
+        "--duplicates"
+      ]
+    }
+  }
+}

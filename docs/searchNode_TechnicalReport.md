@@ -24,7 +24,7 @@ MemFS 引入了基于 BM25（Best Matching 25）和模糊搜索的混合检索�
 
 **结果排序优化**：将 BM25 和模糊搜索的结果进行加权融合，同时考虑命中的字段类型（如实体名称的权重高于观察内容的权重），最终按照综合相关性得分对结果进行排序。
 
-**向后兼容**：保留传统的关键词匹配模式作为备选方案，用户可以通过 `basicFetch=true` 参数显式选择使用传统搜索，这在某些特殊场景下（如已知确切实体名称时的快速检索）可能更为高效。
+**向后兼容**：保留传统的关键词匹配模式作为备选方案，用户可以通过 `legacyGrep=true` 参数显式选择使用传统搜索，这在某些特殊场景下（如已知确切实体名称时的快速检索）可能更为高效。
 
 **可控返回量**：设置合理的默认返回数量上限（15个），避免一次返回过多结果导致LLM上下文溢出，同时确保用户能够获取足够数量的相关实体。
 
@@ -59,9 +59,9 @@ src/tfidf/
     ▼
 searchIntegrator.searchNode()
     │
-    ├── basicFetch=true ──→ TraditionalSearcher.search() ──→ 返回结果
+    ├── legacyGrep=true ──→ TraditionalSearcher.search() ──→ 返回结果
     │
-    └── basicFetch=false ──→ HybridSearchService.search()
+    └── legacyGrep=false ──→ HybridSearchService.search()
                                 │
                                 ├── 1. cleanText() 清洗查询
                                 ├── 2. tokenizeQuery() 生成 gram tokens
@@ -363,7 +363,7 @@ graph.relations.forEach(r => {
 |------|--------|------|
 | `query` | 必填 | 搜索查询字符串 |
 | `time` | false | 是否包含观察内容的时间戳 |
-| `basicFetch` | false | 是否使用传统关键词搜索 |
+| `legacyGrep` | false | 是否使用传统关键词搜索 |
 | `limit` | 15 | 最大返回实体数量 |
 | `maxObservationsPerEntity` | 5 | 每个实体最多返回的观察数量 |
 | `bm25Weight` | 0.7 | BM25 搜索的权重系数 |
@@ -413,7 +413,7 @@ graph.relations.forEach(r => {
 
 ### 8.2 内部调试信息
 
-混合搜索模式 (`basicFetch=false`) 的 `_meta`:
+混合搜索模式 (`legacyGrep=false`) 的 `_meta`:
 
 ```javascript
 _meta: {
@@ -439,7 +439,7 @@ _meta: {
 }
 ```
 
-传统搜索模式 (`basicFetch=true`) 的 `_meta`:
+传统搜索模式 (`legacyGrep=true`) 的 `_meta`:
 
 ```javascript
 _meta: {
@@ -457,7 +457,7 @@ _meta: {
 
 ### 9.1 传统搜索模式
 
-当 `basicFetch=true` 时，使用关键词包含匹配：
+当 `legacyGrep=true` 时，使用关键词包含匹配：
 
 ```javascript
 const keywords = query.split(/\s+/).filter(k => k.length >= 2);

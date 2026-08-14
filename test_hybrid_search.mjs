@@ -130,20 +130,20 @@ async function test() {
     await manager.createRelation(relations);
 
     // ============================================================
-    // 第二部分：测试传统搜索模式 (basicFetch=true)
+    // 第二部分：测试传统搜索模式 (legacyGrep=true)
     // ============================================================
-    section('第二部分：传统搜索模式 (basicFetch=true)');
+    section('第二部分：传统搜索模式 (legacyGrep=true)');
 
-    const trad1 =     await searchIntegrator.searchNode("JavaScript", { basicFetch: true });
+    const trad1 =     await searchIntegrator.searchNode("JavaScript", { legacyGrep: true });
     assert(trad1.entities.length >= 2, '传统搜索 "JavaScript" 返回多个实体');
     assert(trad1.searchMode === 'traditional', 'searchMode 为 traditional');
     console.log('   返回: ' + trad1.entities.length + ' 个实体');
 
-    const trad2 =     await searchIntegrator.searchNode("微软", { basicFetch: true });
+    const trad2 =     await searchIntegrator.searchNode("微软", { legacyGrep: true });
     assert(trad2.entities.length === 1, '传统搜索 "微软" 返回1个实体(TypeScript)');
     console.log('   返回: ' + trad2.entities.length + ' 个实体');
 
-    const trad3 = await searchIntegrator.searchNode("前端", { basicFetch: true });
+    const trad3 = await searchIntegrator.searchNode("前端", { legacyGrep: true });
     assert(trad3.entities.length >= 1, '传统搜索 "前端" 返回至少1个实体');
     console.log('   返回: ' + trad3.entities.length + ' 个实体');
 
@@ -176,24 +176,24 @@ async function test() {
     section('第四部分：搜索结果对比');
 
     // 测试1：精确匹配
-    const exact1 =     await searchIntegrator.searchNode("React", { basicFetch: true });
+    const exact1 =     await searchIntegrator.searchNode("React", { legacyGrep: true });
     const exact2 =     await searchIntegrator.searchNode("React");
     compareResults(exact1, exact2, '精确匹配 "React"');
 
     // 测试2：多关键词
-    const multi1 =     await searchIntegrator.searchNode("JavaScript 前端", { basicFetch: true });
+    const multi1 =     await searchIntegrator.searchNode("JavaScript 前端", { legacyGrep: true });
     const multi2 =     await searchIntegrator.searchNode("JavaScript 前端");
     compareResults(multi1, multi2, '多关键词 "JavaScript 前端"');
 
     // 测试3：模糊匹配
-    const fuzzy1 =     await searchIntegrator.searchNode("JavScript", { basicFetch: true }); // 拼写错误
+    const fuzzy1 =     await searchIntegrator.searchNode("JavScript", { legacyGrep: true }); // 拼写错误
     const fuzzy2 =     await searchIntegrator.searchNode("JavScript"); // 混合搜索应容忍拼写错误
     console.log('   [模糊测试] "JavScript" (拼写错误)');
     console.log('   传统模式返回: ' + fuzzy1.entities.length + ' 个实体');
     console.log('   混合模式返回: ' + fuzzy2.entities.length + ' 个实体');
 
     // 测试4：长尾匹配
-    const tail1 =     await searchIntegrator.searchNode("虚拟DOM", { basicFetch: true });
+    const tail1 =     await searchIntegrator.searchNode("虚拟DOM", { legacyGrep: true });
     const tail2 =     await searchIntegrator.searchNode("虚拟DOM");
     compareResults(tail1, tail2, '长尾查询 "虚拟DOM"');
 
@@ -241,17 +241,17 @@ async function test() {
     section('第七部分：边缘情况测试');
 
     // 空查询
-    const empty1 =     await searchIntegrator.searchNode("", { basicFetch: true });
+    const empty1 =     await searchIntegrator.searchNode("", { legacyGrep: true });
     const empty2 =     await searchIntegrator.searchNode("");
     console.log('   空查询: 传统=' + empty1.entities.length + ', 混合=' + empty2.entities.length);
 
     // 单字符查询（会被过滤）
-    const short1 =     await searchIntegrator.searchNode("J", { basicFetch: true });
+    const short1 =     await searchIntegrator.searchNode("J", { legacyGrep: true });
     const short2 =     await searchIntegrator.searchNode("J");
     console.log('   单字符 "J": 传统=' + short1.entities.length + ', 混合=' + short2.entities.length);
 
     // 无结果查询
-    const noResult1 =     await searchIntegrator.searchNode("xyz123nonexistent", { basicFetch: true });
+    const noResult1 =     await searchIntegrator.searchNode("xyz123nonexistent", { legacyGrep: true });
     const noResult2 =     await searchIntegrator.searchNode("xyz123nonexistent");
     assert(noResult1.entities.length === 0, '传统搜索无结果返回空');
     assert(noResult2.entities.length === 0, '混合搜索无结果返回空');
@@ -264,14 +264,14 @@ async function test() {
 
     const meta1 =     await searchIntegrator.searchNode("TypeScript");
     assert(typeof meta1._meta.timestamp === 'string', '包含时间戳');
-    assert(typeof meta1._meta.basicFetch === 'boolean', '包含basicFetch标记');
-    assert(meta1._meta.basicFetch === false, 'basicFetch默认为false');
+    assert(typeof meta1._meta.legacyGrep === 'boolean', '包含legacyGrep标记');
+    assert(meta1._meta.legacyGrep === false, 'legacyGrep默认为false');
     console.log('   时间戳: ' + meta1._meta.timestamp);
-    console.log('   basicFetch: ' + meta1._meta.basicFetch);
+    console.log('   legacyGrep: ' + meta1._meta.legacyGrep);
 
-    const meta2 =     await searchIntegrator.searchNode("TypeScript", { basicFetch: true });
-    assert(meta2._meta.basicFetch === true, 'basicFetch=true时标记为true');
-    console.log('   basicFetch=true: ' + meta2._meta.basicFetch);
+    const meta2 =     await searchIntegrator.searchNode("TypeScript", { legacyGrep: true });
+    assert(meta2._meta.legacyGrep === true, 'legacyGrep=true时标记为true');
+    console.log('   legacyGrep=true: ' + meta2._meta.legacyGrep);
 
     // ============================================================
     // 第九部分：分词检索测试

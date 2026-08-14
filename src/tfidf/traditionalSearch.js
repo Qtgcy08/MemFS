@@ -38,7 +38,7 @@ function formatTimestampForApi(ts) {
 
 /**
  * Traditional Searcher
- * Maintains existing search behavior for basicFetch=true
+ * Maintains existing search behavior for legacyGrep=true
  */
 export class TraditionalSearcher {
     constructor(options = {}) {
@@ -240,7 +240,7 @@ export class TraditionalSearcher {
             observations: cleanedObservations,
             searchMode: 'traditional',
             _meta: {
-                basicFetch: true,
+                legacyGrep: true,
                 totalCandidates: relevantEntities.length,
                 returnedCount: cleanedEntities.length,
                 bm25Weight: 0,
