@@ -1284,9 +1284,27 @@ export class KnowledgeGraphManager {
                     content: observation.content,
                     referencedBy: referencingEntities.map(e => e.name)
                 });
-
-                warnings.push(`Skipped observation ${obsId} - still referenced by: ${referencingEntities.map(e => e.name).join(', ')}. Use force=true to force delete.`);
             }
+        }
+
+        // Group skipped observations by referencing entity: still referenced by "A": obs 1,2; ...
+        const referencedByEntity = new Map();
+        for (const item of skipped) {
+            for (const entityName of item.referencedBy) {
+                if (!referencedByEntity.has(entityName)) {
+                    referencedByEntity.set(entityName, []);
+                }
+                referencedByEntity.get(entityName).push(item.observationId);
+            }
+        }
+        for (const [entityName, obsIds] of referencedByEntity) {
+            const ids = obsIds.sort((a, b) => a - b).join(',');
+            warnings.push(`still referenced by "${entityName}": obs ${ids}`);
+        }
+
+        // Append the force hint once at the end instead of repeating it per skipped observation
+        if (skipped.length > 0) {
+            warnings.push('Use force=true to force delete.');
         }
 
         // Set operation context for git commit
