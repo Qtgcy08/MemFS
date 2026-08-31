@@ -111,6 +111,6 @@ Quirks:
 
 ## Branches
 
-- `dev` — active development (v3.7.12)
-- `master` — stable releases (v2.5.21, fast-forwarded from origin)
+- `dev` — active development (v3.8.2)
+- `master` — stable releases (v3.8.2, fast-forwarded from origin)
 - `legacy` — v1.3.0 archive
